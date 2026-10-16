@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: tripvahan
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/supabase-status
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://ykaorzsoajfwuzibmgoo.supabase.co
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_EBLp2hLf7wwcb8aiv-ZqTQ_QzW_nqUU
