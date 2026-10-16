@@ -380,44 +380,57 @@ export default function CabOffersView({
                   Free cancellation up to 48 hrs before departure
                 </div>
 
-                {/* Primary Action Button */}
-                <button
-                  type="button"
-                  onClick={() => onSelectQuotation(quote)}
-                  className="w-full py-3 bg-[#004d40] hover:bg-[#00382f] active:scale-[0.99] text-white rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-all"
-                >
-                  {isUrbania ? (
-                    <>
-                      Select This Offer & Review Booking <ArrowRight className="w-4 h-4" />
-                    </>
-                  ) : (
-                    <>
-                      Select ₹{quote.total_quote.toLocaleString("en-IN")} Offer
-                    </>
-                  )}
-                </button>
+                {/* Action Buttons */}
+                {isUrbania ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onSelectQuotation(quote)}
+                      className="w-full py-3 bg-[#004d40] hover:bg-[#00382f] active:scale-[0.99] text-white rounded-xl font-bold text-xs sm:text-sm shadow-sm flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <span>Select This Offer & Review Booking</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
 
-                {/* Secondary Links */}
-                <div className="flex items-center justify-center gap-6 pt-1 text-xs font-semibold text-slate-600">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedDetailsId(isExpanded ? null : quote.id)}
-                    className="hover:text-slate-900 flex items-center gap-1"
-                  >
-                    <span>View Route Map & Audits</span>
-                    {isExpanded ? (
-                      <ChevronUp className="w-3 h-3" />
-                    ) : (
-                      <ChevronDown className="w-3 h-3" />
-                    )}
-                  </button>
-                  <a
-                    href="tel:+919811234567"
-                    className="hover:text-slate-900 flex items-center gap-1 text-[#00594c]"
-                  >
-                    <Phone className="w-3 h-3" /> Call Operator Desk
-                  </a>
-                </div>
+                    <div className="flex items-center justify-center gap-6 pt-1 text-xs font-semibold text-slate-600">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedDetailsId(isExpanded ? null : quote.id)}
+                        className="hover:text-slate-900 flex items-center gap-1"
+                      >
+                        <span>View Route Map & Audits</span>
+                        {isExpanded ? (
+                          <ChevronUp className="w-3 h-3" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3" />
+                        )}
+                      </button>
+                      <a
+                        href="tel:+919811234567"
+                        className="hover:text-slate-900 flex items-center gap-1 text-[#00594c]"
+                      >
+                        <Phone className="w-3 h-3" /> Call Operator Desk
+                      </a>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => onSelectQuotation(quote)}
+                      className="flex-1 py-2.5 px-4 bg-[#e8f1fc] hover:bg-[#d9e8fb] text-[#1e40af] rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center transition-colors cursor-pointer"
+                    >
+                      Select ₹{quote.total_quote.toLocaleString("en-IN")} Offer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedDetailsId(isExpanded ? null : quote.id)}
+                      className="py-2.5 px-4 border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl font-semibold text-xs transition-colors"
+                    >
+                      Details
+                    </button>
+                  </div>
+                )}
 
                 {/* Expanded Details Accordion */}
                 {isExpanded && (

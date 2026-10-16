@@ -31,20 +31,20 @@ export default function Header({
       <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
         {/* Brand / Logo */}
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#004d40] to-[#00796b] flex items-center justify-center text-white shadow-sm shadow-teal-900/20">
+          <div className="w-8 h-8 rounded-lg bg-[#004d40] flex items-center justify-center text-white shadow-xs">
             <Car className="w-4 h-4 stroke-[2.2]" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5 leading-none">
-              <span className="font-bold text-slate-900 tracking-tight text-base sm:text-lg">
+            <div className="flex items-center gap-1.5 leading-tight">
+              <span className="font-extrabold text-slate-900 tracking-tight text-base sm:text-lg">
+                AllRouteBook
+              </span>
+              <span className="text-[9px] font-bold bg-emerald-100 text-[#00594c] px-1.5 py-0.2 rounded-full uppercase tracking-wider">
                 Tripvahan
               </span>
-              <span className="text-[10px] font-semibold bg-emerald-100 text-[#00594c] px-1.5 py-0.5 rounded-full uppercase tracking-wider">
-                Live
-              </span>
             </div>
-            <p className="text-[10.5px] text-slate-500 font-medium tracking-tight">
-              AllRouteBook Cab Connect
+            <p className="text-[10.5px] text-slate-500 font-semibold tracking-tight">
+              Cab Connect
             </p>
           </div>
         </div>
