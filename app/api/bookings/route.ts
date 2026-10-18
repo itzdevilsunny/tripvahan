@@ -80,107 +80,193 @@ export async function POST(req: Request) {
         return match ? parseInt(match[1], 10) : 1;
       };
 
-      // Determine journey start and return dates
-      const startStr = pickup_date || new Date().toISOString().split("T")[0];
-      const startDateObj = new Date(startStr);
-    const tripDays = Math.max(1, parseDurationDays(duration));
-    const returnDateObj = new Date(startDateObj.getTime() + (tripDays - 1) * 86400000);
-    const returnStr = returnDateObj.toISOString().split("T")[0];
+      // Authoritative Data Binding: Look up quotation and trip_request from database
+      let authTravelerId = traveler_id || "guest_traveller";
+      let authTravelerName = traveler_name || "Traveller";
+      let authOperatorName = operator_name || "Commercial Fleet Partner";
+      let authVehicleName = vehicle_name || "Commercial Cab";
+      let authVehicleReg = (vehicle_reg || "DL 01 TA 0000").trim().toUpperCase();
+      let authCircuitTitle = circuit_title || "Group Outstation Journey";
+      let authDuration = duration || "1 Day";
+      let authTotalAmount = Number(total_amount) || 0;
+      let authPerPersonAmount = Number(per_person_amount) || 0;
+      let authPickupDate = pickup_date || new Date().toISOString().split("T")[0];
 
-    // Concurrency Check 1: Check if quotation has already been accepted or trip is already booked
-    try {
-      const { data: existingBooking } = await supabase
-        .from("bookings")
-        .select("id, booking_code")
-        .eq("trip_request_id", trip_request_id)
-        .maybeSingle();
-
-      if (existingBooking) {
-        return NextResponse.json(
-          {
-            error: `This trip request has already been booked (Booking Ref: ${existingBooking.booking_code})`,
-          },
-          { status: 409 }
-        );
-      }
-    } catch {
-      // In case table not yet created
-    }
-
-    // Concurrency Check 2: Multi-day overlapping interval check for the same commercial vehicle
-    if (vehicle_reg) {
       try {
-        const { data: activeVehicleBookings, error: fetchErr } = await supabase
-          .from("bookings")
-          .select("id, booking_code, pickup_date, duration, journey_status")
-          .eq("vehicle_reg", vehicle_reg)
-          .neq("journey_status", "Cancelled");
+        // Fetch quotation to get authentic price and vehicle specifications
+        const { data: dbQuotation } = await supabase
+          .from("quotations")
+          .select("*")
+          .eq("id", quotation_id)
+          .maybeSingle();
 
-        if (fetchErr) {
-          console.warn("Active booking query warning:", fetchErr.message);
+        if (dbQuotation) {
+          if (dbQuotation.status !== "pending") {
+            return NextResponse.json(
+              { error: `This quotation is no longer available (Status: ${dbQuotation.status})` },
+              { status: 409 }
+            );
+          }
+          if (dbQuotation.trip_request_id !== trip_request_id) {
+            return NextResponse.json(
+              { error: "Quotation does not match the specified trip request" },
+              { status: 400 }
+            );
+          }
+          // Bind authoritative server-verified values
+          authOperatorName = dbQuotation.operator_name || authOperatorName;
+          authVehicleName = dbQuotation.vehicle_name || authVehicleName;
+          authVehicleReg = (dbQuotation.vehicle_reg || authVehicleReg).trim().toUpperCase();
+          authTotalAmount = Number(dbQuotation.total_quote) || authTotalAmount;
+          authPerPersonAmount = Number(dbQuotation.per_person_fare) || authPerPersonAmount;
         }
 
-        if (activeVehicleBookings && activeVehicleBookings.length > 0) {
-          for (const b of activeVehicleBookings) {
-            const bStart = b.pickup_date || startStr;
-            const bDays = Math.max(1, parseDurationDays(b.duration));
-            const bStartObj = new Date(bStart);
-            const bEnd = new Date(bStartObj.getTime() + (bDays - 1) * 86400000).toISOString().split("T")[0];
+        // Fetch trip_request to get authentic traveller, dates, and itinerary
+        const { data: dbTrip } = await supabase
+          .from("trip_requests")
+          .select("*")
+          .eq("id", trip_request_id)
+          .maybeSingle();
 
-            // Interval overlap condition: (StartA <= EndB) and (EndA >= StartB)
-            if (startStr <= bEnd && returnStr >= bStart) {
-              return NextResponse.json(
-                {
-                  error: `Vehicle ${vehicle_reg} is already confirmed for booking ${b.booking_code} spanning ${bStart} to ${bEnd}. Overlapping multi-day reservations are prohibited.`,
-                  conflict: {
-                    existing_booking: b.booking_code,
-                    existing_start: bStart,
-                    existing_return: bEnd,
-                    requested_start: startStr,
-                    requested_return: returnStr,
-                  },
-                },
-                { status: 409 }
-              );
-            }
+        if (dbTrip) {
+          if (dbTrip.status === "confirmed" || dbTrip.status === "completed") {
+            return NextResponse.json(
+              { error: `This trip request has already been booked (Status: ${dbTrip.status})` },
+              { status: 409 }
+            );
           }
+          authTravelerId = dbTrip.traveler_id || authTravelerId;
+          authTravelerName = dbTrip.traveler_name || authTravelerName;
+          authCircuitTitle = dbTrip.circuit_title || authCircuitTitle;
+          authPickupDate = dbTrip.start_date || authPickupDate;
+          authDuration = dbTrip.duration || authDuration;
         }
       } catch {
-        // Continue if table not yet created
+        // Continue if database pre-fetch encounters error
       }
-    }
 
-    const bookingCode = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
-    const bookingId = `bk_${Date.now()}`;
+      // Determine journey start and return dates
+      const startStr = authPickupDate;
+      const startDateObj = new Date(startStr);
+      const tripDays = Math.max(1, parseDurationDays(authDuration));
+      const returnDateObj = new Date(startDateObj.getTime() + (tripDays - 1) * 86400000);
+      const returnStr = returnDateObj.toISOString().split("T")[0];
 
-    const newBooking = {
-      id: bookingId,
-      booking_code: bookingCode,
-      trip_request_id,
-      quotation_id,
-      traveler_id: traveler_id || "guest_traveller",
-      traveler_name: traveler_name || "Traveller",
-      operator_name: operator_name || "Commercial Fleet Partner",
-      vehicle_name: vehicle_name || "Commercial Cab",
-      vehicle_reg: vehicle_reg || "DL 01 TA 0000",
-      circuit_title: circuit_title || "Group Outstation Journey",
-      duration: duration || `${tripDays} Day${tripDays > 1 ? "s" : ""}`,
-      total_amount: Number(total_amount),
-      per_person_amount: Number(per_person_amount),
-      escrow_status: "Rate Lock Guaranteed",
-      journey_status: "Confirmed",
-      contract_signed: true,
-      pickup_date: startStr,
-    };
+      // Concurrency Check 1: Check if quotation has already been accepted or trip is already booked
+      try {
+        const { data: existingBooking } = await supabase
+          .from("bookings")
+          .select("id, booking_code")
+          .eq("trip_request_id", trip_request_id)
+          .maybeSingle();
 
-    const { data, error } = await supabase.from("bookings").insert([newBooking]).select().single();
+        if (existingBooking) {
+          return NextResponse.json(
+            {
+              error: `This trip request has already been booked (Booking Ref: ${existingBooking.booking_code})`,
+            },
+            { status: 409 }
+          );
+        }
+      } catch {
+        // In case table not yet created
+      }
 
-    if (error) {
-      return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: 422 }
-      );
-    }
+      // Concurrency Check 2: Multi-day overlapping interval check for the same commercial vehicle
+      if (authVehicleReg) {
+        try {
+          const { data: activeVehicleBookings, error: fetchErr } = await supabase
+            .from("bookings")
+            .select("id, booking_code, pickup_date, duration, journey_status")
+            .eq("vehicle_reg", authVehicleReg)
+            .neq("journey_status", "Cancelled");
+
+          if (fetchErr) {
+            console.warn("Active booking query warning:", fetchErr.message);
+          }
+
+          if (activeVehicleBookings && activeVehicleBookings.length > 0) {
+            for (const b of activeVehicleBookings) {
+              const bStart = b.pickup_date || startStr;
+              const bDays = Math.max(1, parseDurationDays(b.duration));
+              const bStartObj = new Date(bStart);
+              const bEnd = new Date(bStartObj.getTime() + (bDays - 1) * 86400000).toISOString().split("T")[0];
+
+              // Interval overlap condition: (StartA <= EndB) and (EndA >= StartB)
+              if (startStr <= bEnd && returnStr >= bStart) {
+                return NextResponse.json(
+                  {
+                    error: `Vehicle ${authVehicleReg} is already confirmed for booking ${b.booking_code} spanning ${bStart} to ${bEnd}. Overlapping multi-day reservations are prohibited.`,
+                    conflict: {
+                      existing_booking: b.booking_code,
+                      existing_start: bStart,
+                      existing_return: bEnd,
+                      requested_start: startStr,
+                      requested_return: returnStr,
+                    },
+                  },
+                  { status: 409 }
+                );
+              }
+            }
+          }
+        } catch {
+          // Continue if table not yet created
+        }
+      }
+
+      const bookingCode = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
+      const bookingId = `bk_${Date.now()}`;
+
+      const newBooking = {
+        id: bookingId,
+        booking_code: bookingCode,
+        trip_request_id,
+        quotation_id,
+        traveler_id: authTravelerId,
+        traveler_name: authTravelerName,
+        operator_name: authOperatorName,
+        vehicle_name: authVehicleName,
+        vehicle_reg: authVehicleReg,
+        circuit_title: authCircuitTitle,
+        duration: authDuration || `${tripDays} Day${tripDays > 1 ? "s" : ""}`,
+        total_amount: authTotalAmount,
+        per_person_amount: authPerPersonAmount,
+        escrow_status: "Rate Lock Guaranteed",
+        journey_status: "Confirmed",
+        contract_signed: true,
+        pickup_date: startStr,
+      };
+
+      const { data, error } = await supabase.from("bookings").insert([newBooking]).select().single();
+
+      if (error) {
+        // Map PostgreSQL exclusion violations and unique constraints to HTTP 409 Conflict
+        const isConflict =
+          error.code === "23P01" ||
+          error.code === "23505" ||
+          (error.message && (
+            error.message.includes("already confirmed") ||
+            error.message.includes("Overlapping") ||
+            error.message.includes("unique_trip_booking") ||
+            error.message.includes("unique_vehicle_pickup_date")
+          ));
+
+        if (isConflict) {
+          return NextResponse.json(
+            {
+              error: error.message || `Vehicle ${authVehicleReg} is already confirmed for another booking during overlapping dates.`,
+              code: error.code || "409_CONFLICT",
+            },
+            { status: 409 }
+          );
+        }
+
+        return NextResponse.json(
+          { error: error.message, code: error.code },
+          { status: 422 }
+        );
+      }
 
     // Update quotation status to accepted
     try {
