@@ -156,22 +156,37 @@ ALTER TABLE public.trip_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.quotations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public Profiles Read" ON public.profiles;
+DROP POLICY IF EXISTS "Self Profile Insert" ON public.profiles;
+DROP POLICY IF EXISTS "Self Profile Update" ON public.profiles;
 CREATE POLICY "Public Profiles Read" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Self Profile Insert" ON public.profiles FOR INSERT WITH CHECK (auth.uid()::text = id OR auth.uid() IS NULL);
 CREATE POLICY "Self Profile Update" ON public.profiles FOR UPDATE USING (auth.uid()::text = id OR auth.uid() IS NULL);
 
+DROP POLICY IF EXISTS "Public Vehicles Read" ON public.vehicles;
+DROP POLICY IF EXISTS "Operator Vehicle Insert" ON public.vehicles;
+DROP POLICY IF EXISTS "Operator Vehicle Update" ON public.vehicles;
 CREATE POLICY "Public Vehicles Read" ON public.vehicles FOR SELECT USING (true);
 CREATE POLICY "Operator Vehicle Insert" ON public.vehicles FOR INSERT WITH CHECK (auth.uid()::text = operator_id OR auth.uid() IS NULL);
 CREATE POLICY "Operator Vehicle Update" ON public.vehicles FOR UPDATE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
 
+DROP POLICY IF EXISTS "Public Trip Requests Read" ON public.trip_requests;
+DROP POLICY IF EXISTS "Traveler Trip Insert" ON public.trip_requests;
+DROP POLICY IF EXISTS "Traveler Trip Update" ON public.trip_requests;
 CREATE POLICY "Public Trip Requests Read" ON public.trip_requests FOR SELECT USING (true);
 CREATE POLICY "Traveler Trip Insert" ON public.trip_requests FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
 CREATE POLICY "Traveler Trip Update" ON public.trip_requests FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
 
+DROP POLICY IF EXISTS "Public Quotations Read" ON public.quotations;
+DROP POLICY IF EXISTS "Operator Quote Insert" ON public.quotations;
+DROP POLICY IF EXISTS "Operator Quote Update" ON public.quotations;
 CREATE POLICY "Public Quotations Read" ON public.quotations FOR SELECT USING (true);
 CREATE POLICY "Operator Quote Insert" ON public.quotations FOR INSERT WITH CHECK (auth.uid()::text = operator_id OR auth.uid() IS NULL);
 CREATE POLICY "Operator Quote Update" ON public.quotations FOR UPDATE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
 
+DROP POLICY IF EXISTS "Public Bookings Read" ON public.bookings;
+DROP POLICY IF EXISTS "Traveler Booking Insert" ON public.bookings;
+DROP POLICY IF EXISTS "Traveler Booking Update" ON public.bookings;
 CREATE POLICY "Public Bookings Read" ON public.bookings FOR SELECT USING (true);
 CREATE POLICY "Traveler Booking Insert" ON public.bookings FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
 CREATE POLICY "Traveler Booking Update" ON public.bookings FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
