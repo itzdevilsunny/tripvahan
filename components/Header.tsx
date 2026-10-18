@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Bell, ShieldCheck, Database, Compass, Car } from "lucide-react";
+import { Bell, Database, Car, LogIn, UserCheck } from "lucide-react";
 import { UserRole } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
+import { useAuth } from "@/lib/authContext";
+import AuthModal from "./common/AuthModal";
 
 interface HeaderProps {
   currentRole: UserRole;
@@ -16,9 +18,11 @@ export default function Header({
   currentRole,
   onRoleChange,
   onOpenDbModal,
-  unreadCount = 2,
+  unreadCount = 0,
 }: HeaderProps) {
+  const { user, profile } = useAuth();
   const [dbStatus, setDbStatus] = useState<{ connected: boolean; hasTables: boolean } | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   useEffect(() => {
     dataService.checkSupabaseConnection().then((res) => {
@@ -27,100 +31,98 @@ export default function Header({
   }, []);
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs px-3 sm:px-6 py-2.5 transition-all">
-      <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
-        {/* Brand / Logo */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-[#004d40] flex items-center justify-center text-white shadow-xs">
-            <Car className="w-4 h-4 stroke-[2.2]" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5 leading-tight">
-              <span className="font-extrabold text-slate-900 tracking-tight text-base sm:text-lg">
-                AllRouteBook
-              </span>
-              <span className="text-[9px] font-bold bg-emerald-100 text-[#00594c] px-1.5 py-0.2 rounded-full uppercase tracking-wider">
-                Tripvahan
-              </span>
+    <>
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs px-3 sm:px-6 py-2.5 transition-all">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-2">
+          {/* Brand / Logo */}
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-[#004d40] flex items-center justify-center text-white shadow-xs">
+              <Car className="w-4 h-4 stroke-[2.2]" />
             </div>
-            <p className="text-[10.5px] text-slate-500 font-semibold tracking-tight">
-              Cab Connect
-            </p>
+            <div>
+              <div className="flex items-center gap-1.5 leading-tight">
+                <span className="font-extrabold text-slate-900 tracking-tight text-base sm:text-lg">
+                  Tripvahan
+                </span>
+                <span className="text-[9px] font-bold bg-emerald-100 text-[#00594c] px-1.5 py-0.2 rounded-full uppercase tracking-wider">
+                  Verified
+                </span>
+              </div>
+              <p className="text-[10.5px] text-slate-500 font-semibold tracking-tight">
+                Group Travel & Cab Marketplace
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Two-Sided Marketplace Toggle Switcher (Travel vs Partner / Host) */}
-        <div className="flex items-center bg-slate-100/90 p-1 rounded-full border border-slate-200 shadow-inner">
-          <button
-            type="button"
-            onClick={() => onRoleChange("traveller")}
-            className={`px-3 sm:px-4 py-1.2 sm:py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
-              currentRole === "traveller"
-                ? "bg-white text-slate-900 shadow-xs font-bold"
-                : "text-slate-500 hover:text-slate-800"
-            }`}
-          >
-            Travel
-          </button>
-          <button
-            type="button"
-            onClick={() => onRoleChange("operator")}
-            className={`px-3 sm:px-4 py-1.2 sm:py-1.5 rounded-full text-xs font-semibold transition-all duration-200 flex items-center gap-1 ${
-              currentRole === "operator"
-                ? "bg-[#004d40] text-white shadow-xs font-bold"
-                : "text-slate-500 hover:text-slate-800"
-            }`}
-          >
-            Partner / Host
-          </button>
-        </div>
-
-        {/* Right side controls: Supabase status & Notification / Profile */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onOpenDbModal}
-            title="Supabase PostgreSQL Connection & Migration"
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-teal-50 hover:bg-teal-100 border border-teal-200/80 text-teal-800 transition-colors"
-          >
-            <Database className="w-3.5 h-3.5 text-teal-700" />
-            <span className="hidden sm:inline">Supabase</span>
-            <span
-              className={`w-2 h-2 rounded-full ${
-                dbStatus?.connected ? "bg-emerald-500 animate-pulse" : "bg-amber-400"
+          {/* Two-Sided Marketplace Toggle Switcher (Travel vs Partner / Host) */}
+          <div className="flex items-center bg-slate-100/90 p-1 rounded-full border border-slate-200 shadow-inner">
+            <button
+              type="button"
+              onClick={() => onRoleChange("traveller")}
+              className={`px-3 sm:px-4 py-1.2 sm:py-1.5 rounded-full text-xs font-semibold transition-all duration-200 ${
+                currentRole === "traveller"
+                  ? "bg-white text-slate-900 shadow-xs font-bold"
+                  : "text-slate-500 hover:text-slate-800"
               }`}
-            />
-          </button>
+            >
+              Traveller
+            </button>
+            <button
+              type="button"
+              onClick={() => onRoleChange("operator")}
+              className={`px-3 sm:px-4 py-1.2 sm:py-1.5 rounded-full text-xs font-semibold transition-all duration-200 flex items-center gap-1 ${
+                currentRole === "operator"
+                  ? "bg-[#004d40] text-white shadow-xs font-bold"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              Fleet Partner
+            </button>
+          </div>
 
-          {/* Bell Notifications */}
-          <button
-            type="button"
-            className="relative p-2 rounded-full hover:bg-slate-100 text-slate-600 transition-colors"
-            title="Notifications"
-          >
-            <Bell className="w-4 h-4" />
-            {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
-            )}
-          </button>
+          {/* Right side controls: Supabase status & Auth / Profile */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenDbModal}
+              title="Supabase PostgreSQL Connection & Schema"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-teal-50 hover:bg-teal-100 border border-teal-200/80 text-teal-800 transition-colors"
+            >
+              <Database className="w-3.5 h-3.5 text-teal-700" />
+              <span className="hidden sm:inline">Supabase</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  dbStatus?.connected ? "bg-emerald-500 animate-pulse" : "bg-amber-400"
+                }`}
+              />
+            </button>
 
-          {/* Avatar */}
-          <div
-            className="w-8 h-8 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center font-bold text-xs text-slate-700 cursor-pointer overflow-hidden shadow-xs"
-            title={currentRole === "traveller" ? "Rohan S. (Traveller)" : "DL-OP-409 Capt. Vikram"}
-          >
-            {currentRole === "traveller" ? (
-              <span className="bg-emerald-100 text-emerald-900 w-full h-full flex items-center justify-center text-xs">
-                RS
-              </span>
+            {/* Auth trigger / Avatar */}
+            {user ? (
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                className="w-8 h-8 rounded-full bg-[#004d40] text-white flex items-center justify-center font-bold text-xs shadow-xs hover:ring-2 hover:ring-teal-500 transition-all"
+                title={`${profile?.full_name || user.email} (Click to manage account)`}
+              >
+                {profile?.full_name?.charAt(0) || user.email?.charAt(0).toUpperCase() || "U"}
+              </button>
             ) : (
-              <span className="bg-[#004d40] text-white w-full h-full flex items-center justify-center text-xs">
-                RM
-              </span>
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(true)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-[#004d40] text-white hover:bg-[#00382f] shadow-xs transition-colors"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In</span>
+              </button>
             )}
           </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      {/* Auth Modal */}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+    </>
   );
 }

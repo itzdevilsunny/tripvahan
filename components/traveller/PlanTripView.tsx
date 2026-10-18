@@ -17,24 +17,34 @@ import {
   BookmarkCheck,
   Plus,
   Trash2,
+  Navigation,
+  RefreshCw,
 } from "lucide-react";
 import { dataService } from "@/lib/dataService";
 import { TripRequest } from "@/lib/types";
+import { useAuth } from "@/lib/authContext";
 
 interface PlanTripViewProps {
   onPublished: (trip: TripRequest) => void;
 }
 
 export default function PlanTripView({ onPublished }: PlanTripViewProps) {
+  const { user, profile } = useAuth();
+
   // Form state
   const [circuitType, setCircuitType] = useState<string>("Multi-day circuit");
   const [origin, setOrigin] = useState("Delhi NCR");
   const [destination, setDestination] = useState("Jaipur");
   const [duration, setDuration] = useState("3D / 2N");
   const [distanceKm, setDistanceKm] = useState(680);
-  const [startDate, setStartDate] = useState("Fri, 24 Oct");
+  const [startDate, setStartDate] = useState("2026-10-24");
+  const [endDate, setEndDate] = useState("2026-10-27");
   const [pickupTime, setPickupTime] = useState("06:30 AM");
   const [pickupAddress, setPickupAddress] = useState("Dwarka Sector 10, New Delhi");
+
+  const [isEditingRoute, setIsEditingRoute] = useState(false);
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [routeNote, setRouteNote] = useState<string | null>(null);
 
   const [stops, setStops] = useState<string[]>([
     "New Delhi Pickup (Dwarka)",
@@ -65,9 +75,20 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
   ]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
 
   const perPersonCost = totalPax > 0 ? Math.round(targetBudget / totalPax) : 0;
+
+  // Determine matched vehicle class based on capacity matrix
+  const getMatchedVehicleClass = (pax: number, bags: number) => {
+    if (pax <= 4 && bags <= 4) return "Executive Sedan (Dzire / Etios)";
+    if (pax <= 7 && bags <= 6) return "Innova Crysta / Premium SUV (6+1 / 7+1)";
+    if (pax <= 16 && bags <= 14) return "Force Urbania / Tempo Traveller (12-16 Seater)";
+    return "BharatBenz AC Executive Coach (19-26 Seater)";
+  };
+
+  const matchedVehicle = getMatchedVehicleClass(totalPax, totalBags);
 
   const toggleAmenity = (item: string) => {
     if (amenities.includes(item)) {
@@ -89,12 +110,62 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
     setStops(stops.filter((_, i) => i !== idx));
   };
 
+  // Real route calculation via /api/route-estimate
+  const handleRecalculateRoute = async () => {
+    if (!origin.trim() || !destination.trim()) {
+      setErrorMsg("Please enter both origin and destination");
+      return;
+    }
+
+    setIsCalculatingRoute(true);
+    setRouteNote(null);
+    try {
+      const res = await fetch("/api/route-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ origin, destination, stops }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.distance_km) {
+          // Multiply round trips by 2 if needed
+          const calculatedKm = circuitType === "Round Trip" ? data.distance_km * 2 : data.distance_km;
+          setDistanceKm(calculatedKm);
+          if (data.formatted_duration) {
+            setDuration(data.formatted_duration);
+          }
+          setRouteNote(`Route resolved: ${data.distance_km} km driving distance calculated.`);
+        } else if (data.message) {
+          setRouteNote(data.message);
+        }
+      }
+    } catch {
+      setRouteNote("Live highway routing service temporarily unavailable. Using manual estimate.");
+    } finally {
+      setIsCalculatingRoute(false);
+    }
+  };
+
   const handlePublish = async () => {
+    setErrorMsg(null);
+    if (!origin.trim() || !destination.trim()) {
+      setErrorMsg("Origin and destination are required.");
+      return;
+    }
+    if (totalPax < 1) {
+      setErrorMsg("At least 1 passenger is required.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
+      const travelerId = user?.id || "usr_guest_" + Date.now();
+      const travelerName = profile?.full_name || user?.email?.split("@")[0] || "Group Traveller";
+
       const newTrip = await dataService.createTripRequest({
-        traveler_id: "usr_rohan",
-        traveler_name: "Rohan S.",
+        traveler_id: travelerId,
+        traveler_name: travelerName,
         circuit_title: `${origin} → ${destination} (${circuitType})`,
         origin,
         destination,
@@ -102,6 +173,7 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
         circuit_type: circuitType,
         distance_km: distanceKm,
         start_date: startDate,
+        end_date: endDate,
         duration,
         pickup_time: pickupTime,
         pickup_address: pickupAddress,
@@ -109,10 +181,7 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
         adults_count: adults,
         seniors_count: seniors,
         luggage_bags: totalBags,
-        matched_vehicle_class:
-          totalPax > 7
-            ? "Executive Minibus / Tempo Traveller (12-16 Seater)"
-            : "Innova Crysta / Premium SUV",
+        matched_vehicle_class: matchedVehicle,
         indicative_budget_min: Math.round(targetBudget * 0.9),
         indicative_budget_max: Math.round(targetBudget * 1.1),
         target_budget: targetBudget,
@@ -120,8 +189,8 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
       });
 
       onPublished(newTrip);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setErrorMsg(e.message || "Failed to publish trip request");
     } finally {
       setIsSubmitting(false);
     }
@@ -160,13 +229,22 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
             <span className="text-[10px] font-bold uppercase tracking-wider text-teal-800 bg-teal-100/70 px-2 py-0.5 rounded-md">
               {circuitType}
             </span>
-            <span className="text-[11px] font-bold text-slate-700 bg-white/90 px-2 py-0.5 rounded-full shadow-xs">
-              {duration}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-700 bg-white/90 px-2 py-0.5 rounded-full shadow-xs">
+                {duration}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsEditingRoute(!isEditingRoute)}
+                className="text-[10px] font-bold text-teal-800 bg-teal-100 hover:bg-teal-200 px-2 py-0.5 rounded-md transition-colors"
+              >
+                {isEditingRoute ? "Hide Edit" : "Edit Route"}
+              </button>
+            </div>
           </div>
 
           <h2 className="text-lg font-bold text-slate-900 mt-2">
-            {origin} → Agra → {destination}
+            {origin} → {destination}
           </h2>
 
           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 mt-1.5">
@@ -182,13 +260,83 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
               <Clock className="w-3.5 h-3.5 text-slate-500" /> {pickupTime}
             </span>
           </div>
+
+          {routeNote && (
+            <p className="mt-2 text-[11px] text-teal-900 font-medium bg-teal-100/50 p-1.5 rounded-lg">
+              {routeNote}
+            </p>
+          )}
+
+          {/* Interactive Route Editor */}
+          {isEditingRoute && (
+            <div className="mt-3 pt-3 border-t border-teal-200/60 space-y-2.5">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-700">Origin City / Area</label>
+                  <input
+                    type="text"
+                    value={origin}
+                    onChange={(e) => setOrigin(e.target.value)}
+                    className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+                    placeholder="e.g. Delhi NCR"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-700">Destination</label>
+                  <input
+                    type="text"
+                    value={destination}
+                    onChange={(e) => setDestination(e.target.value)}
+                    className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+                    placeholder="e.g. Jaipur"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-700">Start Date</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-700">Circuit Type</label>
+                  <select
+                    value={circuitType}
+                    onChange={(e) => setCircuitType(e.target.value)}
+                    className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white text-slate-900 font-semibold"
+                  >
+                    <option value="Multi-day circuit">Multi-day circuit</option>
+                    <option value="Round Trip">Round Trip</option>
+                    <option value="One-Way Outstation">One-Way Outstation</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={handleRecalculateRoute}
+                  disabled={isCalculatingRoute}
+                  className="flex items-center gap-1.5 text-xs font-bold text-white bg-[#004d40] hover:bg-[#00382f] px-3 py-1.5 rounded-lg shadow-xs transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isCalculatingRoute ? "animate-spin" : ""}`} />
+                  <span>{isCalculatingRoute ? "Calculating Road Route..." : "Calculate Real Highway Route"}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Confirmed Stops and Detours */}
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
-              Confirmed Stops & Detours
+              Confirmed Stops & Detours ({stops.length})
             </span>
             <button
               type="button"
@@ -276,7 +424,7 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
                   onChange={(e) => setAdults(Number(e.target.value))}
                   className="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs font-bold"
                 >
-                  {[1, 2, 4, 6, 8, 10, 12, 14, 16].map((n) => (
+                  {[1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 20].map((n) => (
                     <option key={n} value={n}>
                       {n}
                     </option>
@@ -284,7 +432,7 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
                 </select>
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-slate-500 text-[11px]">Sen:</span>
+                <span className="text-slate-500 text-[11px]">Snr:</span>
                 <select
                   value={seniors}
                   onChange={(e) => setSeniors(Number(e.target.value))}
@@ -300,24 +448,26 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
             </div>
           </div>
 
-          {/* Luggage Load */}
+          {/* Luggage Bags */}
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
             <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>Luggage Load</span>
-              <Luggage className="w-3.5 h-3.5 text-slate-400" />
+              <span>Luggage Bags</span>
+              <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded">
+                Boot Volume
+              </span>
             </div>
             <div className="text-xl font-extrabold text-slate-900 mt-1">
               {totalBags} Bags
             </div>
             <div className="flex items-center gap-2 mt-2 text-xs">
               <div className="flex items-center gap-1">
-                <span className="text-slate-500 text-[11px]">Trolleys:</span>
+                <span className="text-slate-500 text-[11px]">Trolley:</span>
                 <select
                   value={trolleys}
                   onChange={(e) => setTrolleys(Number(e.target.value))}
                   className="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs font-bold"
                 >
-                  {[0, 2, 4, 6, 8, 10, 12].map((n) => (
+                  {[0, 2, 4, 6, 8, 10, 12, 14].map((n) => (
                     <option key={n} value={n}>
                       {n}
                     </option>
@@ -325,7 +475,7 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
                 </select>
               </div>
               <div className="flex items-center gap-1">
-                <span className="text-slate-500 text-[11px]">Duff:</span>
+                <span className="text-slate-500 text-[11px]">Duffle:</span>
                 <select
                   value={duffles}
                   onChange={(e) => setDuffles(Number(e.target.value))}
@@ -342,109 +492,76 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
           </div>
         </div>
 
-        {/* Matched Vehicle Class */}
-        <div className="p-3.5 rounded-xl bg-blue-50/60 border border-blue-200/80 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-800">
-              Matched Vehicle Class
-            </span>
-            <span className="text-[10px] font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">
-              High Fit
-            </span>
-          </div>
-
+        {/* Matched vehicle suggestion */}
+        <div className="p-3 rounded-xl bg-teal-50/70 border border-teal-200 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-blue-100 text-blue-900 shrink-0">
-              <Car className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-[#004d40] text-white flex items-center justify-center">
+              <Car className="w-4 h-4" />
             </div>
             <div>
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">
-                Executive Minibus / Tempo Traveller
-              </h4>
-              <p className="text-[11px] text-slate-600">
-                12–17 Seat Configurations • Dedicated Boot
+              <p className="text-[10px] font-bold text-teal-800 uppercase tracking-wider">
+                RTO Safety Matched Class
               </p>
+              <p className="text-xs font-extrabold text-slate-900">{matchedVehicle}</p>
             </div>
           </div>
-
-          {/* Capacity Alert */}
-          <div className="p-2.5 rounded-lg bg-red-50/90 border border-red-200/80 flex items-start gap-2 text-[11px] text-red-900">
-            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-            <p className="leading-tight">
-              <strong className="font-semibold">Capacity Alert:</strong> Standard 6/7-seater SUVs (Innova/Ertiga) cannot safely hold {totalPax} passengers plus {totalBags} suitcases on NH-48 interstate toll runs.
-            </p>
-          </div>
+          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+            Fit Confirmed
+          </span>
         </div>
       </div>
 
-      {/* Target Trip Budget */}
+      {/* Target Budget Slider */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-slate-900 text-sm">Target Trip Budget</h3>
+            <h3 className="font-bold text-slate-900 text-sm">Target Group Budget</h3>
             <p className="text-[11px] text-slate-500">
-              Estimated based on previous 34 Delhi-Rajasthan multi-day tours
+              Guideline for transport operator competitive quotations
             </p>
           </div>
-          <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full">
-            Tolls & State Taxes Incl.
-          </span>
-        </div>
-
-        <div className="flex items-baseline justify-between pt-1">
-          <div>
-            <span className="text-2xl font-black text-slate-900">
+          <div className="text-right">
+            <span className="text-lg font-extrabold text-[#00594c]">
               ₹{targetBudget.toLocaleString("en-IN")}
             </span>
-            <span className="text-xs text-slate-500 ml-2 font-medium">
-              [Estimated Range: ₹22k - ₹26k]
-            </span>
-          </div>
-          <div className="text-right">
-            <span className="text-xs font-bold text-teal-800">
-              ~₹{perPersonCost.toLocaleString("en-IN")}
-            </span>
-            <span className="text-[10px] text-slate-500 block">/ person</span>
+            <div className="text-[10.5px] font-semibold text-slate-500">
+              ~₹{perPersonCost.toLocaleString("en-IN")} / person
+            </div>
           </div>
         </div>
 
-        {/* Range slider */}
-        <div className="space-y-1.5 pt-1">
-          <input
-            type="range"
-            min={18000}
-            max={32000}
-            step={500}
-            value={targetBudget}
-            onChange={(e) => setTargetBudget(Number(e.target.value))}
-            className="w-full accent-[#00594c] h-2 bg-slate-200 rounded-lg cursor-pointer"
-          />
-          <div className="flex justify-between text-[11px] text-slate-500 font-medium">
-            <span>Economy (₹18,000)</span>
-            <span className="text-[#00594c] font-bold">[Recommended]</span>
-            <span>Luxury 1x1 (₹32,000)</span>
-          </div>
+        <input
+          type="range"
+          min={5000}
+          max={60000}
+          step={500}
+          value={targetBudget}
+          onChange={(e) => setTargetBudget(Number(e.target.value))}
+          className="w-full accent-[#004d40] cursor-pointer"
+        />
+
+        <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold">
+          <span>₹5,000 (Local)</span>
+          <span>₹24,500 (Golden Triangle)</span>
+          <span>₹60,000 (Luxury Coach)</span>
         </div>
       </div>
 
-      {/* Amenity & Chauffeur Preferences */}
+      {/* Corridor Amenities */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs space-y-2.5">
-        <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
-          Amenity & Chauffeur Preferences
-        </h3>
-
+        <h3 className="font-bold text-slate-900 text-sm">Corridor Fleet Requirements</h3>
         {[
           {
             title: "Dual AC & Reclining Pushback Seats",
-            desc: "Recommended for senior passengers during highway transit",
+            desc: "Required for Rajasthan highway heat & 5+ hours passenger comfort",
           },
           {
             title: "Waterproof Carrier Roof Rack",
-            desc: "Secure tarpaulin protection for all soft and hard luggage",
+            desc: "Mandatory for 10+ oversized family luggage bags",
           },
           {
             title: "Bilingual Driver (Hindi & English)",
-            desc: "Trained for heritage tourist circuits and Golden Triangle guides",
+            desc: "Experienced with outstation tourist police checkpoints & FASTag",
           },
         ].map((item, i) => {
           const checked = amenities.includes(item.title);
@@ -480,29 +597,16 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
           ALLROUTEBOOK OPERATOR STANDARD
         </div>
         <p className="text-[11px] text-slate-600 leading-relaxed">
-          Matches are restricted strictly to commercial Yellow-Plate vehicles with valid Delhi-UP-Rajasthan interstate permits, speed governors, and comprehensive passenger insurance.
+          Matches are restricted strictly to commercial Yellow-Plate vehicles with valid interstate permits, speed governors, and comprehensive passenger insurance.
         </p>
       </div>
 
-      {/* 4 Verified Fleets in Corridor */}
-      <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-xs flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-[#00594c] font-bold text-xs shrink-0">
-            4
-          </div>
-          <div>
-            <div className="font-bold text-xs text-slate-900">
-              4 Verified Fleets in Corridor
-            </div>
-            <p className="text-[11px] text-slate-500">
-              Delhi NCR / Noida hub standby • Avg 38m quote
-            </p>
-          </div>
+      {errorMsg && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+          <span>{errorMsg}</span>
         </div>
-        <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
-          Ready to Bid
-        </span>
-      </div>
+      )}
 
       {/* Action Buttons */}
       <div className="space-y-2 pt-2">
@@ -510,7 +614,7 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
           type="button"
           onClick={handlePublish}
           disabled={isSubmitting}
-          className="w-full py-3.5 px-5 bg-[#004d40] hover:bg-[#00382f] active:scale-[0.99] text-white rounded-xl font-bold text-sm shadow-md shadow-teal-950/20 flex items-center justify-center gap-2 transition-all"
+          className="w-full py-3.5 px-5 bg-[#004d40] hover:bg-[#00382f] active:scale-[0.99] text-white rounded-xl font-bold text-sm shadow-md shadow-teal-950/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
         >
           {isSubmitting ? (
             <span>Publishing to Cab Partners...</span>
@@ -538,7 +642,7 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
         </span>
         <span>•</span>
         <span className="flex items-center gap-1">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Direct Operator Chat
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Verified Operators
         </span>
         <span>•</span>
         <span className="flex items-center gap-1">

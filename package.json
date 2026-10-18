@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node --test scripts/test-marketplace.js"
   },
   "engines": {
     "node": ">=20.0.0"

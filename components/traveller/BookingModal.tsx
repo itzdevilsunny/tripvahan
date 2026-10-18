@@ -5,6 +5,7 @@ import {
   X,
   ShieldCheck,
   CheckCircle2,
+  AlertCircle,
   Calendar,
   MapPin,
   Car,
@@ -16,6 +17,7 @@ import {
 import confetti from "canvas-confetti";
 import { Booking, Quotation } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
+import { useAuth } from "@/lib/authContext";
 
 interface BookingModalProps {
   quotation: Quotation | null;
@@ -28,32 +30,54 @@ export default function BookingModal({
   onClose,
   onBookingConfirmed,
 }: BookingModalProps) {
+  const { user, profile } = useAuth();
   const [contractSigned, setContractSigned] = useState(true);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
 
   if (!quotation) return null;
 
   const handleConfirm = async () => {
+    setErrorMsg(null);
     setIsConfirming(true);
     try {
-      const bkg = await dataService.confirmBooking(quotation.id);
+      const travelerId = user?.id || "usr_guest_" + Date.now();
+      const travelerName = profile?.full_name || user?.email?.split("@")[0] || "Group Traveller";
+
+      const bkg = await dataService.confirmBooking({
+        trip_request_id: quotation.trip_request_id,
+        quotation_id: quotation.id,
+        traveler_id: travelerId,
+        traveler_name: travelerName,
+        operator_name: quotation.operator_name,
+        vehicle_name: quotation.vehicle_name,
+        vehicle_reg: quotation.vehicle_reg,
+        circuit_title: quotation.trip_code || "Group Outstation Journey",
+        duration: "Outstation Itinerary",
+        total_amount: quotation.total_quote,
+        per_person_amount: quotation.per_person_fare,
+        escrow_status: "Secured in Escrow",
+        journey_status: "Confirmed",
+        contract_signed: contractSigned,
+        pickup_date: new Date().toISOString().split("T")[0],
+      });
+
       setConfirmedBooking(bkg);
 
-      // Trigger celebration confetti
       try {
         confetti({
           particleCount: 100,
           spread: 70,
           origin: { y: 0.6 },
         });
-      } catch (e) {
+      } catch {
         // ignore
       }
 
       onBookingConfirmed(bkg);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to confirm booking");
     } finally {
       setIsConfirming(false);
     }
@@ -69,9 +93,9 @@ export default function BookingModal({
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base">Confirm Operator Booking</h3>
+              <h3 className="font-bold text-base">Confirm Fleet Booking</h3>
               <p className="text-xs text-teal-100">
-                Escrow Protected • Verified Yellow Board
+                Verified Yellow Board Commercial Transport
               </p>
             </div>
           </div>
@@ -92,7 +116,7 @@ export default function BookingModal({
 
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-3 py-1 rounded-full">
-                Booking Locked in Database
+                Booking Recorded in Database
               </span>
               <h3 className="text-xl font-black text-slate-900 mt-2">
                 Booking ID: {confirmedBooking.booking_code}
@@ -112,7 +136,7 @@ export default function BookingModal({
                 <span className="font-mono font-bold text-slate-800">{confirmedBooking.vehicle_reg}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Total Escrow Amount</span>
+                <span className="text-slate-500 font-medium">Total Quoted Fare</span>
                 <span className="font-extrabold text-[#00594c] text-sm">
                   ₹{confirmedBooking.total_amount.toLocaleString("en-IN")}
                 </span>
@@ -124,9 +148,9 @@ export default function BookingModal({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500 font-medium">Escrow Protection</span>
+                <span className="text-slate-500 font-medium">Reservation Status</span>
                 <span className="font-bold text-emerald-700 flex items-center gap-1">
-                  <Lock className="w-3 h-3" /> Secured in Escrow
+                  <Lock className="w-3 h-3" /> Confirmed & Rate Locked
                 </span>
               </div>
             </div>
@@ -136,20 +160,23 @@ export default function BookingModal({
               onClick={onClose}
               className="w-full py-3 bg-[#004d40] hover:bg-[#00382f] text-white rounded-xl font-bold text-sm shadow-md transition-all"
             >
-              Go to My Bookings
+              Close & View Confirmed Itinerary
             </button>
           </div>
         ) : (
           /* Review & Lock Quotation Screen */
           <div className="p-5 space-y-4 text-sm">
+            {errorMsg && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
             {/* Operator & Vehicle snippet */}
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 flex items-center gap-3">
-              <div className="w-12 h-12 rounded-lg bg-slate-200 overflow-hidden shrink-0">
-                <img
-                  src={quotation.vehicle_image}
-                  alt={quotation.vehicle_name}
-                  className="w-full h-full object-cover"
-                />
+              <div className="w-12 h-12 rounded-lg bg-teal-100 flex items-center justify-center text-[#004d40] shrink-0">
+                <Car className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
@@ -185,7 +212,7 @@ export default function BookingModal({
                 </span>
               </div>
               <div className="pt-2 border-t border-teal-200/80 flex justify-between items-baseline">
-                <span className="font-bold text-slate-900 text-sm">Total Binding Amount</span>
+                <span className="font-bold text-slate-900 text-sm">Total Quoted Amount</span>
                 <div className="text-right">
                   <span className="text-xl font-black text-[#00594c]">
                     ₹{quotation.total_quote.toLocaleString("en-IN")}
@@ -197,11 +224,11 @@ export default function BookingModal({
               </div>
             </div>
 
-            {/* Escrow Guarantee Notice */}
+            {/* Honest Booking Notice */}
             <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200/80 flex items-start gap-2 text-xs text-blue-900">
               <Lock className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
               <p className="leading-snug">
-                <strong>Tripvahan Safe Escrow:</strong> Your payment remains securely locked in escrow. The operator receives payout only after the trip is successfully dispatched and completed.
+                <strong>Guaranteed Price Lock:</strong> Confirming this offer locks the vehicle and fare in the database. No price escalation or fuel surcharges are permitted once accepted.
               </p>
             </div>
 
@@ -215,9 +242,9 @@ export default function BookingModal({
               />
               <div className="text-xs text-slate-700">
                 <span className="font-bold text-slate-900 block">
-                  Digital Contract Sign-off
+                  Digital Agreement & Cancellation Policy
                 </span>
-                I accept the verified operator itinerary, route permits, and 48-hour free cancellation policy.
+                I confirm the passenger group count, vehicle class, and accept the verified operator cancellation policy.
               </div>
             </label>
 

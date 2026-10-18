@@ -14,28 +14,33 @@ import {
 } from "lucide-react";
 import { Booking } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
+import { useAuth } from "@/lib/authContext";
 
 interface BookingsViewProps {
   onPlanNewTrip: () => void;
 }
 
 export default function BookingsView({ onPlanNewTrip }: BookingsViewProps) {
+  const { user } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadBookings() {
-      const data = await dataService.getBookings();
+      setLoading(true);
+      const data = await dataService.getBookings(user?.id);
       setBookings(data);
+      setLoading(false);
     }
     loadBookings();
-  }, []);
+  }, [user]);
 
   return (
     <div className="max-w-xl mx-auto pb-24 px-3 sm:px-4 space-y-4 pt-2">
       <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex items-center justify-between">
         <div>
           <div className="text-[10px] font-bold uppercase tracking-wider text-teal-800">
-            TRAVELER CONSOLE
+            TRAVELLER CONSOLE
           </div>
           <h2 className="text-lg font-black text-slate-900">My Confirmed Journeys</h2>
         </div>
@@ -44,7 +49,12 @@ export default function BookingsView({ onPlanNewTrip }: BookingsViewProps) {
         </span>
       </div>
 
-      {bookings.length === 0 ? (
+      {loading ? (
+        <div className="bg-white rounded-2xl p-8 border border-slate-200/90 shadow-xs text-center space-y-2">
+          <div className="w-7 h-7 mx-auto border-3 border-teal-700 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-slate-500 font-medium">Loading your bookings...</p>
+        </div>
+      ) : bookings.length === 0 ? (
         <div className="bg-white rounded-2xl p-8 border border-slate-200/90 shadow-xs text-center space-y-3">
           <div className="w-14 h-14 bg-teal-50 text-[#00594c] rounded-full flex items-center justify-center mx-auto">
             <Car className="w-7 h-7" />
@@ -99,24 +109,10 @@ export default function BookingsView({ onPlanNewTrip }: BookingsViewProps) {
                   <span className="text-slate-500">Commercial Registration</span>
                   <span className="font-mono font-bold text-slate-800">{b.vehicle_reg}</span>
                 </div>
-                <div className="flex justify-between items-baseline pt-1 border-t border-slate-200">
-                  <span className="text-slate-500">Total Price</span>
-                  <span className="font-black text-[#00594c] text-sm">
-                    ₹{b.total_amount.toLocaleString("en-IN")}
-                  </span>
+                <div className="flex justify-between pt-1 border-t border-slate-200 font-extrabold">
+                  <span className="text-slate-900">Total Fare (Locked)</span>
+                  <span className="text-[#00594c]">₹{b.total_amount.toLocaleString("en-IN")}</span>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between text-xs pt-1">
-                <span className="text-emerald-700 font-semibold flex items-center gap-1 text-[11px]">
-                  <Lock className="w-3.5 h-3.5" /> {b.escrow_status}
-                </span>
-                <a
-                  href="tel:+919811234567"
-                  className="text-xs font-bold text-[#00594c] flex items-center gap-1 hover:underline"
-                >
-                  <Phone className="w-3.5 h-3.5" /> Call Operator Desk
-                </a>
               </div>
             </div>
           ))}

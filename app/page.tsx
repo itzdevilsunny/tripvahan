@@ -14,9 +14,11 @@ import PartnerHubView from "@/components/operator/PartnerHubView";
 import SupabaseModal from "@/components/common/SupabaseModal";
 import { Booking, Quotation, TripRequest, UserRole } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
+import { useAuth } from "@/lib/authContext";
 import { CheckCircle2, ArrowRight } from "lucide-react";
 
 export default function Home() {
+  const { role: authRole, switchActiveRole } = useAuth();
   const [role, setRole] = useState<UserRole>("traveller");
   const [currentTab, setCurrentTab] = useState<TabType>("offers");
 
@@ -30,9 +32,9 @@ export default function Home() {
   const [showQuoteSubmitterModal, setShowQuoteSubmitterModal] = useState(false);
   const [showDbModal, setShowDbModal] = useState(false);
 
-  // Dynamic counts
-  const [offersCount, setOffersCount] = useState(3);
-  const [requestsCount, setRequestsCount] = useState(3);
+  // Dynamic counts from database
+  const [offersCount, setOffersCount] = useState(0);
+  const [requestsCount, setRequestsCount] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -43,17 +45,27 @@ export default function Home() {
   const refreshCounts = async () => {
     const trips = await dataService.getTripRequests();
     setRequestsCount(trips.length);
-    const quotes = await dataService.getQuotations();
+    if (!activeTrip && trips.length > 0) {
+      setActiveTrip(trips[0]);
+    }
+    const quotes = await dataService.getQuotations(activeTrip?.id);
     setOffersCount(quotes.length);
   };
 
   useEffect(() => {
     refreshCounts();
-  }, []);
+  }, [activeTrip?.id]);
+
+  useEffect(() => {
+    if (authRole) {
+      setRole(authRole);
+    }
+  }, [authRole]);
 
   // Handle Role change
   const handleRoleChange = (newRole: UserRole) => {
     setRole(newRole);
+    switchActiveRole(newRole);
     if (newRole === "traveller") {
       if (currentTab === "requests" || currentTab === "partner_hub") {
         setCurrentTab("offers");
@@ -70,7 +82,7 @@ export default function Home() {
     setActiveTrip(newTrip);
     refreshCounts();
     showToast(
-      `Trip request #${newTrip.trip_code} published! Cab partners in Delhi corridor are now submitting quotations.`
+      `Trip request #${newTrip.trip_code} published! Verified fleet partners are now discovering your itinerary.`
     );
     setCurrentTab("offers");
   };
@@ -84,7 +96,10 @@ export default function Home() {
   // Traveler confirms booking
   const handleBookingConfirmed = (booking: Booking) => {
     refreshCounts();
-    showToast(`Booking ${booking.booking_code} confirmed! Escrow funds locked safely.`);
+    showToast(`Booking ${booking.booking_code} confirmed! Fleet partner dispatched.`);
+    setShowBookingModal(false);
+    setSelectedQuoteForBooking(null);
+    setCurrentTab("bookings");
   };
 
   // Operator clicks "Review & Quote" on a trip request
@@ -103,25 +118,18 @@ export default function Home() {
   };
 
   // Traveler picks circuit from Explore
-  const handleSelectCircuitFromExplore = (circuit: {
-    origin: string;
-    destination: string;
-    title: string;
-    duration: string;
-    distanceKm: number;
-    budget: number;
-  }) => {
+  const handleSelectCircuitFromExplore = () => {
     setCurrentTab("plan");
   };
 
   return (
     <div className="min-h-screen bg-[#f4f6fa] flex flex-col text-slate-900 selection:bg-teal-100 selection:text-teal-900">
-      {/* Sticky Header with Two-Sided Switcher */}
+      {/* Sticky Header with Two-Sided Switcher & Auth */}
       <Header
         currentRole={role}
         onRoleChange={handleRoleChange}
         onOpenDbModal={() => setShowDbModal(true)}
-        unreadCount={2}
+        unreadCount={0}
       />
 
       {/* Floating Action Toast */}
@@ -170,7 +178,7 @@ export default function Home() {
           </>
         )}
 
-        {/* Operator / Cab Owner Views */}
+        {/* Operator / Fleet Partner Views */}
         {role === "operator" && (
           <>
             {currentTab === "requests" && (
@@ -201,7 +209,7 @@ export default function Home() {
         )}
       </main>
 
-      {/* Booking Review & Escrow Modal */}
+      {/* Booking Review & Lock Modal */}
       <BookingModal
         quotation={selectedQuoteForBooking}
         onClose={() => {
