@@ -38,14 +38,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setRole(data.role);
         }
       } else {
-        // Fallback profile from user metadata if profiles table is not yet migrated or empty
+        const isOperator = (userMeta?.role as UserRole) === "operator";
         const fallbackProfile: Profile = {
           id: userId,
-          full_name: userMeta?.full_name || userMeta?.name || "Verified User",
+          full_name: userMeta?.full_name || userMeta?.name || "User",
           email: userMeta?.email || "",
           role: (userMeta?.role as UserRole) || "traveller",
           operator_name: userMeta?.operator_name || undefined,
-          verified: true,
+          verified: isOperator ? false : true,
           created_at: new Date().toISOString(),
         };
         setProfile(fallbackProfile);
@@ -122,8 +122,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             email,
             role: chosenRole,
             operator_name: operatorName || null,
-            verified: true,
-            rating: 5.0,
+            verified: chosenRole === "operator" ? false : true,
+            rating: chosenRole === "operator" ? 4.90 : 5.0,
             reviews_count: 0,
           });
         } catch {
