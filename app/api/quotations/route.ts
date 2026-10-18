@@ -128,6 +128,25 @@ export async function POST(req: Request) {
       // In case tables are not yet loaded
     }
 
+    let isOperatorVerified = false;
+    try {
+      const { data: operatorProfile } = await supabase
+        .from("profiles")
+        .select("verified")
+        .eq("id", operator_id)
+        .maybeSingle();
+
+      if (operatorProfile && operatorProfile.verified === true) {
+        isOperatorVerified = true;
+      }
+    } catch {
+      // Continue
+    }
+
+    const assignedBadge = isOperatorVerified
+      ? (badge || "Tier-1 Verified Partner")
+      : "Pending Verification";
+
     const quoteId = `quo_${Date.now()}`;
     const newQuotation = {
       id: quoteId,
@@ -143,7 +162,7 @@ export async function POST(req: Request) {
       vehicle_reg,
       vehicle_image: vehicle_image || null,
       model_year: Number(model_year),
-      badge: badge || "Tier-1 Verified Partner",
+      badge: assignedBadge,
       base_vehicle_fuel_rate: baseRate,
       driver_night_allowance: driverAllowance,
       tolls_state_permit_taxes: tollsTaxes,

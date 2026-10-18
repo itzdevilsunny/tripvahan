@@ -56,7 +56,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Verify operator profile exists
+    let isOperatorVerified = false;
+    // Verify operator profile exists and verification status
     try {
       const { data: operatorProfile } = await supabase
         .from("profiles")
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
           { status: 404 }
         );
       }
+      isOperatorVerified = operatorProfile.verified === true;
     } catch {
       // Continue if table query fails
     }
@@ -86,9 +88,11 @@ export async function POST(req: Request) {
       luggage_capacity: Number(luggage_capacity) || Math.round(seats * 0.8),
       model_year: Number(model_year) || 2023,
       features,
-      compliance_status: compliance_status || "Commercial Yellow Board Valid",
+      compliance_status: isOperatorVerified
+        ? (compliance_status || "Commercial Yellow Board Valid")
+        : "Pending Operator Verification",
       speed_governor_status: speed_governor_status || "Speed-Gov: 80 km/h Active",
-      status: "Available",
+      status: isOperatorVerified ? "Available" : "Pending Verification",
       image_url: image_url || null,
     };
 
