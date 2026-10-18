@@ -6,7 +6,7 @@ export async function GET() {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const { data: tripData, error: tripError } = await supabase
       .from("trip_requests")
-      .select("id, count")
+      .select("id")
       .limit(1);
 
     const hasTables = !tripError || tripError.code !== "PGRST205";
