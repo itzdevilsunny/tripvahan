@@ -23,6 +23,28 @@ export async function GET(req: Request) {
   }
 }
 
+// In-memory mutex map to serialize concurrent booking operations for the same vehicle
+const vehicleLocks = new Map<string, Promise<void>>();
+
+async function withVehicleLock<T>(vehicleReg: string, fn: () => Promise<T>): Promise<T> {
+  const current = vehicleLocks.get(vehicleReg) || Promise.resolve();
+  let release: () => void;
+  const next = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vehicleLocks.set(vehicleReg, current.then(() => next));
+
+  await current;
+  try {
+    return await fn();
+  } finally {
+    release!();
+    if (vehicleLocks.get(vehicleReg) === next) {
+      vehicleLocks.delete(vehicleReg);
+    }
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -48,16 +70,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // Helper to calculate journey date intervals
-    const parseDurationDays = (durationStr?: string): number => {
-      if (!durationStr) return 1;
-      const match = durationStr.match(/(\d+)\s*(?:days?|d|nights?|n)/i);
-      return match ? parseInt(match[1], 10) : 1;
-    };
+    const lockKey = (vehicle_reg || "default_vehicle_lock").trim().toUpperCase();
 
-    // Determine journey start and return dates
-    const startStr = pickup_date || new Date().toISOString().split("T")[0];
-    const startDateObj = new Date(startStr);
+    return await withVehicleLock(lockKey, async () => {
+      // Helper to calculate journey date intervals
+      const parseDurationDays = (durationStr?: string): number => {
+        if (!durationStr) return 1;
+        const match = durationStr.match(/(\d+)\s*(?:days?|d|nights?|n)/i);
+        return match ? parseInt(match[1], 10) : 1;
+      };
+
+      // Determine journey start and return dates
+      const startStr = pickup_date || new Date().toISOString().split("T")[0];
+      const startDateObj = new Date(startStr);
     const tripDays = Math.max(1, parseDurationDays(duration));
     const returnDateObj = new Date(startDateObj.getTime() + (tripDays - 1) * 86400000);
     const returnStr = returnDateObj.toISOString().split("T")[0];
@@ -152,8 +177,8 @@ export async function POST(req: Request) {
 
     if (error) {
       return NextResponse.json(
-        { data: newBooking, warning: error.message, database_synced: false },
-        { status: 201 }
+        { error: error.message, code: error.code },
+        { status: 422 }
       );
     }
 
@@ -172,7 +197,28 @@ export async function POST(req: Request) {
       // Continue
     }
 
-    return NextResponse.json({ data, database_synced: true }, { status: 201 });
+      return NextResponse.json({ data, database_synced: true }, { status: 201 });
+    });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    const vehicleReg = searchParams.get("vehicle_reg");
+
+    if (id) {
+      await supabase.from("bookings").delete().eq("id", id);
+      await supabase.from("bookings").update({ journey_status: "Cancelled" }).eq("id", id);
+    } else if (vehicleReg) {
+      await supabase.from("bookings").delete().eq("vehicle_reg", vehicleReg);
+      await supabase.from("bookings").update({ journey_status: "Cancelled" }).eq("vehicle_reg", vehicleReg);
+    }
+
+    return NextResponse.json({ success: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

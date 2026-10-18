@@ -219,6 +219,21 @@ CREATE POLICY "Operator Quote Update" ON public.quotations FOR UPDATE USING (aut
 DROP POLICY IF EXISTS "Public Bookings Read" ON public.bookings;
 DROP POLICY IF EXISTS "Traveler Booking Insert" ON public.bookings;
 DROP POLICY IF EXISTS "Traveler Booking Update" ON public.bookings;
+DROP POLICY IF EXISTS "Bookings Delete" ON public.bookings;
 CREATE POLICY "Public Bookings Read" ON public.bookings FOR SELECT USING (true);
 CREATE POLICY "Traveler Booking Insert" ON public.bookings FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
 CREATE POLICY "Traveler Booking Update" ON public.bookings FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+CREATE POLICY "Bookings Delete" ON public.bookings FOR DELETE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+
+-- Additional Delete Policies for profiles, vehicles, trip_requests, quotations
+DROP POLICY IF EXISTS "Profiles Delete" ON public.profiles;
+CREATE POLICY "Profiles Delete" ON public.profiles FOR DELETE USING (auth.uid()::text = id OR auth.uid() IS NULL);
+
+DROP POLICY IF EXISTS "Vehicles Delete" ON public.vehicles;
+CREATE POLICY "Vehicles Delete" ON public.vehicles FOR DELETE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+
+DROP POLICY IF EXISTS "Trip Requests Delete" ON public.trip_requests;
+CREATE POLICY "Trip Requests Delete" ON public.trip_requests FOR DELETE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+
+DROP POLICY IF EXISTS "Quotations Delete" ON public.quotations;
+CREATE POLICY "Quotations Delete" ON public.quotations FOR DELETE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
