@@ -225,11 +225,19 @@ export default function BookingModal({
             </div>
 
             {/* Honest Booking Notice */}
-            <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200/80 flex items-start gap-2 text-xs text-blue-900">
-              <Lock className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
-              <p className="leading-snug">
-                <strong>Guaranteed Price Lock:</strong> Confirming this offer locks the vehicle and fare in the database. No price escalation or fuel surcharges are permitted once accepted.
-              </p>
+            <div className="p-3 rounded-xl bg-blue-50/80 border border-blue-200/80 space-y-1.5 text-xs text-blue-950">
+              <div className="flex items-start gap-2">
+                <Lock className="w-4 h-4 text-blue-700 shrink-0 mt-0.5" />
+                <p className="leading-snug">
+                  <strong>Guaranteed Price Lock:</strong> Confirming this offer locks the vehicle and fare in the database. No price escalation or fuel surcharges are permitted once accepted.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-blue-200/60 flex items-start gap-2 text-[11px] text-blue-800">
+                <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                <p>
+                  <strong>Direct Pilot Settlement:</strong> Token deposit and balance trip payment are settled directly with the verified operator upon dispatch. Tripvahan charges zero platform commission during this pilot.
+                </p>
+              </div>
             </div>
 
             {/* Digital Contract Sign-off */}
