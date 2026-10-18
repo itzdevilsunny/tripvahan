@@ -18,7 +18,7 @@ export async function GET(req: Request) {
 
     const { data, error } = await query;
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ data: [], warning: error.message }, { status: 200 });
     }
 
     return NextResponse.json({ data: data || [] });
