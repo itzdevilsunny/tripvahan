@@ -123,14 +123,15 @@ CREATE TABLE IF NOT EXISTS public.quotations (
   validity_hours INT DEFAULT 48,
   operator_note TEXT,
   status TEXT DEFAULT 'pending',
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT unique_trip_vehicle_quote UNIQUE (trip_request_id, vehicle_id)
 );
 
 CREATE TABLE IF NOT EXISTS public.bookings (
   id TEXT PRIMARY KEY,
   booking_code TEXT NOT NULL UNIQUE,
-  trip_request_id TEXT NOT NULL,
-  quotation_id TEXT NOT NULL,
+  trip_request_id TEXT NOT NULL REFERENCES public.trip_requests(id) ON DELETE RESTRICT,
+  quotation_id TEXT NOT NULL REFERENCES public.quotations(id) ON DELETE RESTRICT,
   traveler_id TEXT NOT NULL,
   traveler_name TEXT NOT NULL,
   operator_name TEXT NOT NULL,
@@ -144,7 +145,9 @@ CREATE TABLE IF NOT EXISTS public.bookings (
   journey_status TEXT DEFAULT 'Confirmed',
   contract_signed BOOLEAN DEFAULT true,
   pickup_date TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT unique_trip_booking UNIQUE (trip_request_id),
+  CONSTRAINT unique_vehicle_pickup_date UNIQUE (vehicle_reg, pickup_date)
 );
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -153,17 +156,25 @@ ALTER TABLE public.trip_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.quotations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Public Read Profiles" ON public.profiles FOR SELECT USING (true);
-CREATE POLICY "Public Insert Profiles" ON public.profiles FOR INSERT WITH CHECK (true);
-CREATE POLICY "Public Read Vehicles" ON public.vehicles FOR SELECT USING (true);
-CREATE POLICY "Public Insert Vehicles" ON public.vehicles FOR INSERT WITH CHECK (true);
-CREATE POLICY "Public Read TripRequests" ON public.trip_requests FOR SELECT USING (true);
-CREATE POLICY "Public Insert TripRequests" ON public.trip_requests FOR INSERT WITH CHECK (true);
-CREATE POLICY "Public Update TripRequests" ON public.trip_requests FOR UPDATE USING (true);
-CREATE POLICY "Public Read Quotations" ON public.quotations FOR SELECT USING (true);
-CREATE POLICY "Public Insert Quotations" ON public.quotations FOR INSERT WITH CHECK (true);
-CREATE POLICY "Public Read Bookings" ON public.bookings FOR SELECT USING (true);
-CREATE POLICY "Public Insert Bookings" ON public.bookings FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Profiles Read" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Self Profile Insert" ON public.profiles FOR INSERT WITH CHECK (auth.uid()::text = id OR auth.uid() IS NULL);
+CREATE POLICY "Self Profile Update" ON public.profiles FOR UPDATE USING (auth.uid()::text = id OR auth.uid() IS NULL);
+
+CREATE POLICY "Public Vehicles Read" ON public.vehicles FOR SELECT USING (true);
+CREATE POLICY "Operator Vehicle Insert" ON public.vehicles FOR INSERT WITH CHECK (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+CREATE POLICY "Operator Vehicle Update" ON public.vehicles FOR UPDATE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+
+CREATE POLICY "Public Trip Requests Read" ON public.trip_requests FOR SELECT USING (true);
+CREATE POLICY "Traveler Trip Insert" ON public.trip_requests FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+CREATE POLICY "Traveler Trip Update" ON public.trip_requests FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+
+CREATE POLICY "Public Quotations Read" ON public.quotations FOR SELECT USING (true);
+CREATE POLICY "Operator Quote Insert" ON public.quotations FOR INSERT WITH CHECK (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+CREATE POLICY "Operator Quote Update" ON public.quotations FOR UPDATE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+
+CREATE POLICY "Public Bookings Read" ON public.bookings FOR SELECT USING (true);
+CREATE POLICY "Traveler Booking Insert" ON public.bookings FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+CREATE POLICY "Traveler Booking Update" ON public.bookings FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
 `;
     navigator.clipboard.writeText(sql);
     setCopied(true);

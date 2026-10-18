@@ -1,5 +1,5 @@
 -- ====================================================================
--- TRIPVAHAN POSTGRESQL SCHEMA FOR SUPABASE
+-- TRIPVAHAN PRODUCTION-GRADE POSTGRESQL SCHEMA FOR SUPABASE
 -- Run this in your Supabase SQL Editor: https://supabase.com/dashboard/project/ykaorzsoajfwuzibmgoo/sql
 -- ====================================================================
 
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   full_name TEXT NOT NULL,
   email TEXT,
   phone TEXT,
-  role TEXT NOT NULL DEFAULT 'traveller', -- 'traveller', 'operator', 'both'
+  role TEXT NOT NULL DEFAULT 'traveller', -- 'traveller', 'operator', 'both', 'admin'
   operator_name TEXT,
   operator_code TEXT,
   rating NUMERIC DEFAULT 4.90,
@@ -24,10 +24,10 @@ CREATE TABLE IF NOT EXISTS public.vehicles (
   operator_id TEXT NOT NULL,
   operator_name TEXT NOT NULL,
   name TEXT NOT NULL,
-  category TEXT NOT NULL, -- 'Urbania / Tempo', 'Innova Crysta', 'BharatBenz Coach', 'Executive Sedan'
+  category TEXT NOT NULL, -- 'Urbania / Tempo', 'Innova Crysta', 'Coach / Minibus', 'Executive Sedan'
   registration_number TEXT NOT NULL,
-  seating_capacity INT NOT NULL,
-  luggage_capacity INT NOT NULL,
+  seating_capacity INT NOT NULL CHECK (seating_capacity > 0),
+  luggage_capacity INT NOT NULL CHECK (luggage_capacity >= 0),
   model_year INT NOT NULL,
   features TEXT[] DEFAULT '{}',
   compliance_status TEXT DEFAULT 'Commercial Yellow Board Valid',
@@ -48,20 +48,20 @@ CREATE TABLE IF NOT EXISTS public.trip_requests (
   destination TEXT NOT NULL,
   stops JSONB DEFAULT '[]'::jsonb,
   circuit_type TEXT NOT NULL, -- 'Multi-day circuit', 'Round Trip', 'One-Way Outstation'
-  distance_km INT NOT NULL,
+  distance_km INT NOT NULL CHECK (distance_km > 0),
   start_date TEXT NOT NULL,
   end_date TEXT,
   duration TEXT NOT NULL,
   pickup_time TEXT NOT NULL,
   pickup_address TEXT NOT NULL,
-  travellers_count INT NOT NULL,
+  travellers_count INT NOT NULL CHECK (travellers_count > 0),
   adults_count INT DEFAULT 0,
   seniors_count INT DEFAULT 0,
-  luggage_bags INT NOT NULL,
+  luggage_bags INT NOT NULL DEFAULT 0,
   matched_vehicle_class TEXT NOT NULL,
   indicative_budget_min NUMERIC,
   indicative_budget_max NUMERIC,
-  target_budget NUMERIC NOT NULL,
+  target_budget NUMERIC NOT NULL CHECK (target_budget > 0),
   amenities TEXT[] DEFAULT '{}',
   status TEXT DEFAULT 'open', -- 'open', 'bidding', 'confirmed', 'completed', 'cancelled'
   quotes_count INT DEFAULT 0,
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS public.trip_requests (
 -- 4. Create quotations table
 CREATE TABLE IF NOT EXISTS public.quotations (
   id TEXT PRIMARY KEY,
-  trip_request_id TEXT NOT NULL,
+  trip_request_id TEXT NOT NULL REFERENCES public.trip_requests(id) ON DELETE CASCADE,
   trip_code TEXT NOT NULL,
   operator_id TEXT NOT NULL,
   operator_name TEXT NOT NULL,
@@ -84,25 +84,27 @@ CREATE TABLE IF NOT EXISTS public.quotations (
   vehicle_image TEXT,
   model_year INT NOT NULL,
   badge TEXT, -- 'Best Match • Tier-1 Partner', 'Best Economy Choice', 'Ultra Premium Class'
-  base_vehicle_fuel_rate NUMERIC NOT NULL,
-  driver_night_allowance NUMERIC NOT NULL,
-  tolls_state_permit_taxes NUMERIC NOT NULL,
-  total_quote NUMERIC NOT NULL,
-  per_person_fare NUMERIC NOT NULL,
+  base_vehicle_fuel_rate NUMERIC NOT NULL CHECK (base_vehicle_fuel_rate >= 0),
+  driver_night_allowance NUMERIC NOT NULL DEFAULT 0 CHECK (driver_night_allowance >= 0),
+  tolls_state_permit_taxes NUMERIC NOT NULL DEFAULT 0 CHECK (tolls_state_permit_taxes >= 0),
+  total_quote NUMERIC NOT NULL CHECK (total_quote > 0),
+  per_person_fare NUMERIC NOT NULL CHECK (per_person_fare > 0),
   inclusions TEXT[] DEFAULT '{}',
   exclusions TEXT[] DEFAULT '{}',
   validity_hours INT DEFAULT 48,
   operator_note TEXT,
   status TEXT DEFAULT 'pending', -- 'pending', 'accepted', 'declined', 'expired'
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  -- Database constraint: Prevent duplicate bids for the same vehicle on the same trip request
+  CONSTRAINT unique_trip_vehicle_quote UNIQUE (trip_request_id, vehicle_id)
 );
 
 -- 5. Create bookings table
 CREATE TABLE IF NOT EXISTS public.bookings (
   id TEXT PRIMARY KEY,
   booking_code TEXT NOT NULL UNIQUE,
-  trip_request_id TEXT NOT NULL,
-  quotation_id TEXT NOT NULL,
+  trip_request_id TEXT NOT NULL REFERENCES public.trip_requests(id) ON DELETE RESTRICT,
+  quotation_id TEXT NOT NULL REFERENCES public.quotations(id) ON DELETE RESTRICT,
   traveler_id TEXT NOT NULL,
   traveler_name TEXT NOT NULL,
   operator_name TEXT NOT NULL,
@@ -110,44 +112,50 @@ CREATE TABLE IF NOT EXISTS public.bookings (
   vehicle_reg TEXT NOT NULL,
   circuit_title TEXT NOT NULL,
   duration TEXT NOT NULL,
-  total_amount NUMERIC NOT NULL,
-  per_person_amount NUMERIC NOT NULL,
+  total_amount NUMERIC NOT NULL CHECK (total_amount > 0),
+  per_person_amount NUMERIC NOT NULL CHECK (per_person_amount > 0),
   escrow_status TEXT DEFAULT 'Secured in Escrow',
-  journey_status TEXT DEFAULT 'Confirmed', -- 'Confirmed', 'Dispatched', 'Ongoing', 'Completed'
+  journey_status TEXT DEFAULT 'Confirmed', -- 'Confirmed', 'Dispatched', 'Ongoing', 'Completed', 'Cancelled'
   contract_signed BOOLEAN DEFAULT true,
   pickup_date TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  -- Database constraint 1: A trip request can only be confirmed once
+  CONSTRAINT unique_trip_booking UNIQUE (trip_request_id),
+  -- Database constraint 2: A vehicle cannot be double-booked on the same pickup date
+  CONSTRAINT unique_vehicle_pickup_date UNIQUE (vehicle_reg, pickup_date)
 );
 
--- Disable Row Level Security (RLS) for public prototype demo / or enable with permissive policy:
+-- ====================================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- ====================================================================
+
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vehicles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trip_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.quotations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
 
--- Create permissive policies for anon / authenticated access
-DO $$
-BEGIN
-  CREATE POLICY "Public Read Profiles" ON public.profiles FOR SELECT USING (true);
-  CREATE POLICY "Public Insert Profiles" ON public.profiles FOR INSERT WITH CHECK (true);
-  CREATE POLICY "Public Update Profiles" ON public.profiles FOR UPDATE USING (true);
+-- 1. Profiles RLS
+CREATE POLICY "Public Profiles Read" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Self Profile Insert" ON public.profiles FOR INSERT WITH CHECK (auth.uid()::text = id OR auth.uid() IS NULL);
+CREATE POLICY "Self Profile Update" ON public.profiles FOR UPDATE USING (auth.uid()::text = id OR auth.uid() IS NULL);
 
-  CREATE POLICY "Public Read Vehicles" ON public.vehicles FOR SELECT USING (true);
-  CREATE POLICY "Public Insert Vehicles" ON public.vehicles FOR INSERT WITH CHECK (true);
-  CREATE POLICY "Public Update Vehicles" ON public.vehicles FOR UPDATE USING (true);
+-- 2. Vehicles RLS
+CREATE POLICY "Public Vehicles Read" ON public.vehicles FOR SELECT USING (true);
+CREATE POLICY "Operator Vehicle Insert" ON public.vehicles FOR INSERT WITH CHECK (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+CREATE POLICY "Operator Vehicle Update" ON public.vehicles FOR UPDATE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
 
-  CREATE POLICY "Public Read TripRequests" ON public.trip_requests FOR SELECT USING (true);
-  CREATE POLICY "Public Insert TripRequests" ON public.trip_requests FOR INSERT WITH CHECK (true);
-  CREATE POLICY "Public Update TripRequests" ON public.trip_requests FOR UPDATE USING (true);
+-- 3. Trip Requests RLS
+CREATE POLICY "Public Trip Requests Read" ON public.trip_requests FOR SELECT USING (true);
+CREATE POLICY "Traveler Trip Insert" ON public.trip_requests FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+CREATE POLICY "Traveler Trip Update" ON public.trip_requests FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
 
-  CREATE POLICY "Public Read Quotations" ON public.quotations FOR SELECT USING (true);
-  CREATE POLICY "Public Insert Quotations" ON public.quotations FOR INSERT WITH CHECK (true);
-  CREATE POLICY "Public Update Quotations" ON public.quotations FOR UPDATE USING (true);
+-- 4. Quotations RLS
+CREATE POLICY "Public Quotations Read" ON public.quotations FOR SELECT USING (true);
+CREATE POLICY "Operator Quote Insert" ON public.quotations FOR INSERT WITH CHECK (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+CREATE POLICY "Operator Quote Update" ON public.quotations FOR UPDATE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
 
-  CREATE POLICY "Public Read Bookings" ON public.bookings FOR SELECT USING (true);
-  CREATE POLICY "Public Insert Bookings" ON public.bookings FOR INSERT WITH CHECK (true);
-  CREATE POLICY "Public Update Bookings" ON public.bookings FOR UPDATE USING (true);
-EXCEPTION WHEN others THEN
-  NULL;
-END $$;
+-- 5. Bookings RLS
+CREATE POLICY "Public Bookings Read" ON public.bookings FOR SELECT USING (true);
+CREATE POLICY "Traveler Booking Insert" ON public.bookings FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+CREATE POLICY "Traveler Booking Update" ON public.bookings FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
