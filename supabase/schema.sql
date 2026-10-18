@@ -114,16 +114,64 @@ CREATE TABLE IF NOT EXISTS public.bookings (
   duration TEXT NOT NULL,
   total_amount NUMERIC NOT NULL CHECK (total_amount > 0),
   per_person_amount NUMERIC NOT NULL CHECK (per_person_amount > 0),
-  escrow_status TEXT DEFAULT 'Secured in Escrow',
+  escrow_status TEXT DEFAULT 'Rate Lock Guaranteed',
   journey_status TEXT DEFAULT 'Confirmed', -- 'Confirmed', 'Dispatched', 'Ongoing', 'Completed', 'Cancelled'
   contract_signed BOOLEAN DEFAULT true,
   pickup_date TEXT,
+  start_date DATE,
+  return_date DATE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   -- Database constraint 1: A trip request can only be confirmed once
   CONSTRAINT unique_trip_booking UNIQUE (trip_request_id),
   -- Database constraint 2: A vehicle cannot be double-booked on the same pickup date
   CONSTRAINT unique_vehicle_pickup_date UNIQUE (vehicle_reg, pickup_date)
 );
+
+-- Ensure columns exist if table was already created
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS start_date DATE;
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS return_date DATE;
+
+-- PostgreSQL Trigger: Concurrency-Safe Prevention of Conflicting Overlapping Reservations
+CREATE OR REPLACE FUNCTION check_vehicle_booking_overlap()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_start DATE;
+  v_end DATE;
+  v_conflict RECORD;
+BEGIN
+  -- Determine start_date and return_date
+  v_start := COALESCE(NEW.start_date, NEW.pickup_date::date, CURRENT_DATE);
+  v_end := COALESCE(NEW.return_date, v_start);
+
+  NEW.start_date := v_start;
+  NEW.return_date := v_end;
+
+  -- Check for overlapping active bookings for the same vehicle
+  SELECT id, booking_code, start_date, return_date INTO v_conflict
+  FROM public.bookings
+  WHERE vehicle_reg = NEW.vehicle_reg
+    AND journey_status != 'Cancelled'
+    AND id != NEW.id
+    AND (
+      (v_start <= COALESCE(return_date, pickup_date::date) AND v_end >= COALESCE(start_date, pickup_date::date))
+    )
+  LIMIT 1;
+
+  IF FOUND THEN
+    RAISE EXCEPTION 'Vehicle % is already confirmed for booking % covering % to %. Overlapping multi-day reservations are prohibited.',
+      NEW.vehicle_reg, v_conflict.booking_code, v_conflict.start_date, v_conflict.return_date
+      USING ERRCODE = '23P01'; -- exclusion_violation
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_check_vehicle_booking_overlap ON public.bookings;
+CREATE TRIGGER trg_check_vehicle_booking_overlap
+BEFORE INSERT OR UPDATE ON public.bookings
+FOR EACH ROW
+EXECUTE FUNCTION check_vehicle_booking_overlap();
 
 -- ====================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES

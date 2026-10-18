@@ -141,14 +141,57 @@ CREATE TABLE IF NOT EXISTS public.bookings (
   duration TEXT NOT NULL,
   total_amount NUMERIC NOT NULL,
   per_person_amount NUMERIC NOT NULL,
-  escrow_status TEXT DEFAULT 'Secured in Escrow',
+  escrow_status TEXT DEFAULT 'Rate Lock Guaranteed',
   journey_status TEXT DEFAULT 'Confirmed',
   contract_signed BOOLEAN DEFAULT true,
   pickup_date TEXT,
+  start_date DATE,
+  return_date DATE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT unique_trip_booking UNIQUE (trip_request_id),
   CONSTRAINT unique_vehicle_pickup_date UNIQUE (vehicle_reg, pickup_date)
 );
+
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS start_date DATE;
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS return_date DATE;
+
+CREATE OR REPLACE FUNCTION check_vehicle_booking_overlap()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_start DATE;
+  v_end DATE;
+  v_conflict RECORD;
+BEGIN
+  v_start := COALESCE(NEW.start_date, NEW.pickup_date::date, CURRENT_DATE);
+  v_end := COALESCE(NEW.return_date, v_start);
+  NEW.start_date := v_start;
+  NEW.return_date := v_end;
+
+  SELECT id, booking_code, start_date, return_date INTO v_conflict
+  FROM public.bookings
+  WHERE vehicle_reg = NEW.vehicle_reg
+    AND journey_status != 'Cancelled'
+    AND id != NEW.id
+    AND (
+      (v_start <= COALESCE(return_date, pickup_date::date) AND v_end >= COALESCE(start_date, pickup_date::date))
+    )
+  LIMIT 1;
+
+  IF FOUND THEN
+    RAISE EXCEPTION 'Vehicle % is already confirmed for booking % covering % to %. Overlapping multi-day reservations are prohibited.',
+      NEW.vehicle_reg, v_conflict.booking_code, v_conflict.start_date, v_conflict.return_date
+      USING ERRCODE = '23P01';
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_check_vehicle_booking_overlap ON public.bookings;
+CREATE TRIGGER trg_check_vehicle_booking_overlap
+BEFORE INSERT OR UPDATE ON public.bookings
+FOR EACH ROW
+EXECUTE FUNCTION check_vehicle_booking_overlap();
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vehicles ENABLE ROW LEVEL SECURITY;

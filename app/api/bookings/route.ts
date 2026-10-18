@@ -48,6 +48,20 @@ export async function POST(req: Request) {
       );
     }
 
+    // Helper to calculate journey date intervals
+    const parseDurationDays = (durationStr?: string): number => {
+      if (!durationStr) return 1;
+      const match = durationStr.match(/(\d+)\s*(?:days?|d|nights?|n)/i);
+      return match ? parseInt(match[1], 10) : 1;
+    };
+
+    // Determine journey start and return dates
+    const startStr = pickup_date || new Date().toISOString().split("T")[0];
+    const startDateObj = new Date(startStr);
+    const tripDays = Math.max(1, parseDurationDays(duration));
+    const returnDateObj = new Date(startDateObj.getTime() + (tripDays - 1) * 86400000);
+    const returnStr = returnDateObj.toISOString().split("T")[0];
+
     // Concurrency Check 1: Check if quotation has already been accepted or trip is already booked
     try {
       const { data: existingBooking } = await supabase
@@ -68,23 +82,43 @@ export async function POST(req: Request) {
       // In case table not yet created
     }
 
-    // Concurrency Check 2: Check if vehicle is already booked for the same pickup date
-    if (vehicle_reg && pickup_date) {
+    // Concurrency Check 2: Multi-day overlapping interval check for the same commercial vehicle
+    if (vehicle_reg) {
       try {
-        const { data: conflictingVehicleBooking } = await supabase
+        const { data: activeVehicleBookings, error: fetchErr } = await supabase
           .from("bookings")
-          .select("id, booking_code, pickup_date")
+          .select("id, booking_code, pickup_date, duration, journey_status")
           .eq("vehicle_reg", vehicle_reg)
-          .eq("pickup_date", pickup_date)
-          .maybeSingle();
+          .neq("journey_status", "Cancelled");
 
-        if (conflictingVehicleBooking) {
-          return NextResponse.json(
-            {
-              error: `Vehicle ${vehicle_reg} is already confirmed for another booking on ${pickup_date}. Please select another offer.`,
-            },
-            { status: 409 }
-          );
+        if (fetchErr) {
+          console.warn("Active booking query warning:", fetchErr.message);
+        }
+
+        if (activeVehicleBookings && activeVehicleBookings.length > 0) {
+          for (const b of activeVehicleBookings) {
+            const bStart = b.pickup_date || startStr;
+            const bDays = Math.max(1, parseDurationDays(b.duration));
+            const bStartObj = new Date(bStart);
+            const bEnd = new Date(bStartObj.getTime() + (bDays - 1) * 86400000).toISOString().split("T")[0];
+
+            // Interval overlap condition: (StartA <= EndB) and (EndA >= StartB)
+            if (startStr <= bEnd && returnStr >= bStart) {
+              return NextResponse.json(
+                {
+                  error: `Vehicle ${vehicle_reg} is already confirmed for booking ${b.booking_code} spanning ${bStart} to ${bEnd}. Overlapping multi-day reservations are prohibited.`,
+                  conflict: {
+                    existing_booking: b.booking_code,
+                    existing_start: bStart,
+                    existing_return: bEnd,
+                    requested_start: startStr,
+                    requested_return: returnStr,
+                  },
+                },
+                { status: 409 }
+              );
+            }
+          }
         }
       } catch {
         // Continue if table not yet created
@@ -105,13 +139,13 @@ export async function POST(req: Request) {
       vehicle_name: vehicle_name || "Commercial Cab",
       vehicle_reg: vehicle_reg || "DL 01 TA 0000",
       circuit_title: circuit_title || "Group Outstation Journey",
-      duration: duration || "Multi-day",
+      duration: duration || `${tripDays} Day${tripDays > 1 ? "s" : ""}`,
       total_amount: Number(total_amount),
       per_person_amount: Number(per_person_amount),
-      escrow_status: "Secured in Escrow",
+      escrow_status: "Rate Lock Guaranteed",
       journey_status: "Confirmed",
       contract_signed: true,
-      pickup_date: pickup_date || null,
+      pickup_date: startStr,
     };
 
     const { data, error } = await supabase.from("bookings").insert([newBooking]).select().single();

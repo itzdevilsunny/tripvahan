@@ -56,6 +56,24 @@ export async function POST(req: Request) {
       );
     }
 
+    // Verify operator profile exists
+    try {
+      const { data: operatorProfile } = await supabase
+        .from("profiles")
+        .select("id, role, operator_name, verified")
+        .eq("id", operator_id)
+        .maybeSingle();
+
+      if (!operatorProfile) {
+        return NextResponse.json(
+          { error: "Operator profile not found. Please complete operator registration first." },
+          { status: 404 }
+        );
+      }
+    } catch {
+      // Continue if table query fails
+    }
+
     const vehicleId = `veh_${Date.now()}`;
     const newVehicle = {
       id: vehicleId,

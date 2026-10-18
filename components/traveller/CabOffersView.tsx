@@ -337,7 +337,7 @@ export default function CabOffersView({
                       onClick={() => onSelectQuotation(quote)}
                       className="w-full py-2.5 px-4 bg-[#004d40] hover:bg-[#00382f] active:scale-[0.99] text-white rounded-xl font-bold text-xs shadow-xs flex items-center justify-center gap-1.5 transition-all"
                     >
-                      <span>Select Offer & Review Escrow Contract</span>
+                      <span>Select Offer & Review Reservation Contract</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   </div>

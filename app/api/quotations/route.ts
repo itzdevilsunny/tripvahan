@@ -78,6 +78,37 @@ export async function POST(req: Request) {
     const passengerCount = Math.max(1, Number(travellers_count));
     const perPersonFare = Math.round(calculatedTotal / passengerCount);
 
+    // Verify vehicle ownership and capacity
+    try {
+      const { data: vehicleRecord } = await supabase
+        .from("vehicles")
+        .select("id, operator_id, seating_capacity, luggage_capacity, status")
+        .eq("id", vehicle_id)
+        .maybeSingle();
+
+      if (vehicleRecord) {
+        // 1. Authorization & Ownership Check
+        if (vehicleRecord.operator_id !== operator_id) {
+          return NextResponse.json(
+            { error: "Forbidden: You are not authorized to quote using another operator's vehicle" },
+            { status: 403 }
+          );
+        }
+
+        // 2. Capacity Validation Check
+        if (vehicleRecord.seating_capacity < passengerCount) {
+          return NextResponse.json(
+            {
+              error: `Vehicle seating capacity (${vehicleRecord.seating_capacity} seats) is insufficient for ${passengerCount} passengers`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+    } catch {
+      // Continue if table query fails
+    }
+
     // Prevent duplicate quote for the same vehicle on the same trip
     try {
       const { data: existingQuote } = await supabase

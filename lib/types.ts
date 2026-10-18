@@ -104,9 +104,11 @@ export interface Booking {
   duration: string;
   total_amount: number;
   per_person_amount: number;
-  escrow_status: "Secured in Escrow" | "Released to Operator";
-  journey_status: "Confirmed" | "Dispatched" | "Ongoing" | "Completed";
+  escrow_status: "Rate Lock Guaranteed" | "Secured in Escrow" | "Released to Operator";
+  journey_status: "Confirmed" | "Dispatched" | "Ongoing" | "Completed" | "Cancelled";
   contract_signed: boolean;
   pickup_date?: string;
+  start_date?: string;
+  return_date?: string;
   created_at?: string;
 }

@@ -57,7 +57,7 @@ export default function BookingModal({
         duration: "Outstation Itinerary",
         total_amount: quotation.total_quote,
         per_person_amount: quotation.per_person_fare,
-        escrow_status: "Secured in Escrow",
+        escrow_status: "Rate Lock Guaranteed",
         journey_status: "Confirmed",
         contract_signed: contractSigned,
         pickup_date: new Date().toISOString().split("T")[0],

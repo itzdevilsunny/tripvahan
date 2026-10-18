@@ -81,7 +81,7 @@ export default function ExploreView({ onSelectCircuit }: ExploreViewProps) {
           Verified Fleet Quotes For Your Custom Outstation Trips
         </h1>
         <p className="text-xs text-teal-100 leading-relaxed">
-          No algorithmic surge pricing. Post your trip requirements, get binding itemized quotes from registered commercial cab owners, and confirm with escrow safety.
+          No algorithmic surge pricing. Post your trip requirements, get binding itemized quotes from registered commercial cab owners, and confirm with verified rate-lock guarantee.
         </p>
       </div>
 
