@@ -58,24 +58,8 @@ export default function QuoteSubmitterModal({
         setVehicles(data);
         setSelectedVehicleId(data[0].id);
       } else {
-        // Fallback default fleet vehicle for quoting
-        const defaultVehicle: Vehicle = {
-          id: `veh_default_${Date.now()}`,
-          operator_id: opId,
-          operator_name: profile?.operator_name || "Commercial Fleet Partner",
-          name: "Force Urbania Executive Class (13-Seater)",
-          category: "Urbania / Tempo",
-          registration_number: "DL 01 TA 9821",
-          seating_capacity: 13,
-          luggage_capacity: 12,
-          model_year: 2023,
-          features: ["13 Luxury Recliners", "Dual AC", "Waterproof Carrier"],
-          compliance_status: "Commercial Yellow Board Valid",
-          speed_governor_status: "Speed-Gov: 80 km/h Active",
-          status: "Available",
-        };
-        setVehicles([defaultVehicle]);
-        setSelectedVehicleId(defaultVehicle.id);
+        setVehicles([]);
+        setSelectedVehicleId("");
       }
     }
     loadVehicles();
@@ -95,27 +79,31 @@ export default function QuoteSubmitterModal({
 
   const handleSubmit = async () => {
     setErrorMsg(null);
+    if (!selectedVehicle?.id) {
+      setErrorMsg("No commercial vehicle selected. Please register a vehicle in the Fleet Console before quoting.");
+      return;
+    }
     setIsSubmitting(true);
     try {
       const opId = profile?.id || user?.id || "op_fleet_partner";
-      const opName = profile?.operator_name || profile?.full_name || "Royal Rajputana Fleet Mobility";
+      const opName = profile?.operator_name || profile?.full_name || "Commercial Fleet Partner";
 
       const newQuote = await dataService.submitQuotation({
         trip_request_id: tripRequest.id,
         trip_code: tripRequest.trip_code,
         operator_id: opId,
         operator_name: opName,
-        operator_rating: profile?.rating || 4.92,
-        reviews_count: profile?.reviews_count || 143,
-        vehicle_id: selectedVehicle?.id || "veh_urb_01",
-        vehicle_name: selectedVehicle?.name || "Force Urbania Executive Class",
-        vehicle_category: selectedVehicle?.category || "Urbania / Tempo",
-        vehicle_reg: selectedVehicle?.registration_number || "DL 01 TA 9821",
+        operator_rating: profile?.rating || 4.90,
+        reviews_count: profile?.reviews_count || 0,
+        vehicle_id: selectedVehicle.id,
+        vehicle_name: selectedVehicle.name,
+        vehicle_category: selectedVehicle.category,
+        vehicle_reg: selectedVehicle.registration_number,
         vehicle_image:
-          selectedVehicle?.image_url ||
+          selectedVehicle.image_url ||
           "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80",
-        model_year: selectedVehicle?.model_year || 2023,
-        badge: "Tier-1 Verified Partner",
+        model_year: selectedVehicle.model_year || 2023,
+        badge: profile?.verified ? "Tier-1 Verified Partner" : "Pending Verification",
         base_vehicle_fuel_rate: baseFuelRate,
         driver_night_allowance: nightAllowance,
         tolls_state_permit_taxes: includeTolls ? tollsAmount : 0,
@@ -213,56 +201,68 @@ export default function QuoteSubmitterModal({
               </span>
             </div>
 
-            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-lg bg-teal-100 text-[#00594c]">
-                    <Car className="w-5 h-5" />
+            {vehicles.length === 0 ? (
+              <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-xs">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>No Registered Fleet Vehicles</span>
+                </div>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  You have not registered any commercial vehicles yet. Please open the Fleet Console to register your commercial vehicle before submitting quotations.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-lg bg-teal-100 text-[#00594c]">
+                      <Car className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-xs sm:text-sm">
+                        {selectedVehicle?.name}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 font-mono">
+                        {selectedVehicle?.registration_number}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-xs sm:text-sm">
-                      {selectedVehicle?.name}
-                    </h4>
-                    <p className="text-[11px] text-slate-500 font-mono">
-                      {selectedVehicle?.registration_number}
-                    </p>
-                  </div>
+
+                  {vehicles.length > 1 && (
+                    <select
+                      value={selectedVehicleId}
+                      onChange={(e) => setSelectedVehicleId(e.target.value)}
+                      className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700"
+                    >
+                      {vehicles.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
-                {vehicles.length > 1 && (
-                  <select
-                    value={selectedVehicleId}
-                    onChange={(e) => setSelectedVehicleId(e.target.value)}
-                    className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700"
-                  >
-                    {vehicles.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+                {/* Requirement Check banner */}
+                <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    Capacity: {selectedVehicle?.seating_capacity} Seats for{" "}
+                    {tripRequest.travellers_count} Pax • {selectedVehicle?.luggage_capacity} Bags
+                  </span>
+                </div>
 
-              {/* Requirement Check banner */}
-              <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 flex items-center gap-2 font-medium">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>
-                  Capacity: {selectedVehicle?.seating_capacity} Seats for{" "}
-                  {tripRequest.travellers_count} Pax • {selectedVehicle?.luggage_capacity} Bags
-                </span>
+                <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1">
+                  <span className="flex items-center gap-1 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                    Commercial Yellow Plate Valid
+                  </span>
+                  <span className="font-semibold text-blue-700">
+                    Speed-Gov: 80 km/h Active
+                  </span>
+                </div>
               </div>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1">
-                <span className="flex items-center gap-1 font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                  Commercial Yellow Plate Valid
-                </span>
-                <span className="font-semibold text-blue-700">
-                  Speed-Gov: 80 km/h Active
-                </span>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Section 2: Cost Breakdown Calculator */}
@@ -435,7 +435,7 @@ export default function QuoteSubmitterModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={isSubmitting}
+                disabled={isSubmitting || vehicles.length === 0}
                 className="flex-1 py-3 bg-[#004d40] hover:bg-[#00382f] active:scale-[0.99] text-white font-bold text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-50"
               >
                 {isSubmitting ? (

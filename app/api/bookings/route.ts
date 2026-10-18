@@ -100,26 +100,31 @@ export async function POST(req: Request) {
           .eq("id", quotation_id)
           .maybeSingle();
 
-        if (dbQuotation) {
-          if (dbQuotation.status !== "pending") {
-            return NextResponse.json(
-              { error: `This quotation is no longer available (Status: ${dbQuotation.status})` },
-              { status: 409 }
-            );
-          }
-          if (dbQuotation.trip_request_id !== trip_request_id) {
-            return NextResponse.json(
-              { error: "Quotation does not match the specified trip request" },
-              { status: 400 }
-            );
-          }
-          // Bind authoritative server-verified values
-          authOperatorName = dbQuotation.operator_name || authOperatorName;
-          authVehicleName = dbQuotation.vehicle_name || authVehicleName;
-          authVehicleReg = (dbQuotation.vehicle_reg || authVehicleReg).trim().toUpperCase();
-          authTotalAmount = Number(dbQuotation.total_quote) || authTotalAmount;
-          authPerPersonAmount = Number(dbQuotation.per_person_fare) || authPerPersonAmount;
+        if (!dbQuotation) {
+          return NextResponse.json(
+            { error: "Quotation record not found in database" },
+            { status: 404 }
+          );
         }
+
+        if (dbQuotation.status !== "pending") {
+          return NextResponse.json(
+            { error: `This quotation is no longer available (Status: ${dbQuotation.status})` },
+            { status: 409 }
+          );
+        }
+        if (dbQuotation.trip_request_id !== trip_request_id) {
+          return NextResponse.json(
+            { error: "Quotation does not match the specified trip request" },
+            { status: 400 }
+          );
+        }
+        // Bind authoritative server-verified values
+        authOperatorName = dbQuotation.operator_name || authOperatorName;
+        authVehicleName = dbQuotation.vehicle_name || authVehicleName;
+        authVehicleReg = (dbQuotation.vehicle_reg || authVehicleReg).trim().toUpperCase();
+        authTotalAmount = Number(dbQuotation.total_quote) || authTotalAmount;
+        authPerPersonAmount = Number(dbQuotation.per_person_fare) || authPerPersonAmount;
 
         // Fetch trip_request to get authentic traveller, dates, and itinerary
         const { data: dbTrip } = await supabase
@@ -128,21 +133,29 @@ export async function POST(req: Request) {
           .eq("id", trip_request_id)
           .maybeSingle();
 
-        if (dbTrip) {
-          if (dbTrip.status === "confirmed" || dbTrip.status === "completed") {
-            return NextResponse.json(
-              { error: `This trip request has already been booked (Status: ${dbTrip.status})` },
-              { status: 409 }
-            );
-          }
-          authTravelerId = dbTrip.traveler_id || authTravelerId;
-          authTravelerName = dbTrip.traveler_name || authTravelerName;
-          authCircuitTitle = dbTrip.circuit_title || authCircuitTitle;
-          authPickupDate = dbTrip.start_date || authPickupDate;
-          authDuration = dbTrip.duration || authDuration;
+        if (!dbTrip) {
+          return NextResponse.json(
+            { error: "Trip request record not found in database" },
+            { status: 404 }
+          );
         }
-      } catch {
-        // Continue if database pre-fetch encounters error
+
+        if (dbTrip.status === "confirmed" || dbTrip.status === "completed") {
+          return NextResponse.json(
+            { error: `This trip request has already been booked (Status: ${dbTrip.status})` },
+            { status: 409 }
+          );
+        }
+        authTravelerId = dbTrip.traveler_id || authTravelerId;
+        authTravelerName = dbTrip.traveler_name || authTravelerName;
+        authCircuitTitle = dbTrip.circuit_title || authCircuitTitle;
+        authPickupDate = dbTrip.start_date || authPickupDate;
+        authDuration = dbTrip.duration || authDuration;
+      } catch (err: any) {
+        return NextResponse.json(
+          { error: err.message || "Failed to verify quotation and trip request" },
+          { status: 500 }
+        );
       }
 
       // Determine journey start and return dates
@@ -305,6 +318,80 @@ export async function DELETE(req: Request) {
     }
 
     return NextResponse.json({ success: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json();
+    const { id, journey_status, reason } = body;
+
+    if (!id || !journey_status) {
+      return NextResponse.json(
+        { error: "Booking ID and journey_status are required" },
+        { status: 400 }
+      );
+    }
+
+    const validStatuses = ["Confirmed", "Ongoing", "Completed", "Cancelled"];
+    if (!validStatuses.includes(journey_status)) {
+      return NextResponse.json(
+        { error: `Invalid journey_status. Allowed values: ${validStatuses.join(", ")}` },
+        { status: 400 }
+      );
+    }
+
+    // Fetch existing booking to verify existence and linkages
+    const { data: existingBooking, error: fetchErr } = await supabase
+      .from("bookings")
+      .select("id, trip_request_id, quotation_id, vehicle_reg, journey_status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr || !existingBooking) {
+      return NextResponse.json(
+        { error: "Booking record not found" },
+        { status: 404 }
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .update({ journey_status })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 422 }
+      );
+    }
+
+    // If cancelled, reset trip request back to open and quotation to pending
+    if (journey_status === "Cancelled") {
+      try {
+        if (existingBooking.trip_request_id) {
+          await supabase
+            .from("trip_requests")
+            .update({ status: "open" })
+            .eq("id", existingBooking.trip_request_id);
+        }
+        if (existingBooking.quotation_id) {
+          await supabase
+            .from("quotations")
+            .update({ status: "pending" })
+            .eq("id", existingBooking.quotation_id);
+        }
+      } catch {
+        // Non-fatal cascade
+      }
+    }
+
+    return NextResponse.json({ data, success: true });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
