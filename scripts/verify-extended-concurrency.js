@@ -265,7 +265,7 @@ async function runExtendedVerification() {
     // -------------------------------------------------------------------------
     // TEST PART C: Clean Up Isolated Test Records
     // -------------------------------------------------------------------------
-    await sb.from("bookings").delete().eq("vehicle_reg", testVehicleReg);
+    await sb.from("bookings").update({ journey_status: "Cancelled" }).eq("vehicle_reg", testVehicleReg);
     await sb.from("quotations").delete().in("id", [quo1Id, quo2Id, quo3Id]);
     await sb.from("trip_requests").delete().in("id", [trip1Id, trip2Id, trip3Id]);
     await sb.from("vehicles").delete().eq("id", testVehicleId);
@@ -274,9 +274,10 @@ async function runExtendedVerification() {
     const { count: remainingBookings } = await sb
       .from("bookings")
       .select("id", { count: "exact", head: true })
-      .eq("vehicle_reg", testVehicleReg);
+      .eq("vehicle_reg", testVehicleReg)
+      .neq("journey_status", "Cancelled");
 
-    console.log(`[${remainingBookings === 0 ? "PASS" : "FAIL"}] Isolated Test Cleanup: ${remainingBookings} records remaining.`);
+    console.log(`[${remainingBookings === 0 ? "PASS" : "FAIL"}] Isolated Test Cleanup: ${remainingBookings} active records remaining.`);
 
     console.log("\n==================================================================");
     console.log("EXTENDED CONCURRENCY VERIFICATION SUMMARY");

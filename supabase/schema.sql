@@ -132,56 +132,140 @@ ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS start_date DATE;
 ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS return_date DATE;
 
 -- PostgreSQL Trigger: Concurrency-Safe Prevention of Conflicting Overlapping Reservations
-CREATE OR REPLACE FUNCTION trg_prevent_vehicle_booking_overlap()
-RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION public.trg_prevent_vehicle_booking_overlap()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
 DECLARE
-  v_start DATE;
-  v_end DATE;
-  v_conflict RECORD;
-  v_days INT;
+    v_start DATE;
+    v_end DATE;
+    v_conflict RECORD;
+    v_days INT;
 BEGIN
-  -- Acquire an exclusive transaction advisory lock on the vehicle registration.
-  -- This serializes all concurrent inserts/updates for the SAME vehicle registration
-  -- across ALL distributed serverless lambda instances and containers worldwide.
-  PERFORM pg_advisory_xact_lock(hashtext(NEW.vehicle_reg));
+    -- If booking is cancelled or being cancelled, bypass overlap checks
+    IF NEW.journey_status = 'Cancelled' THEN
+        RETURN NEW;
+    END IF;
 
-  -- Determine start_date and return_date
-  v_start := COALESCE(NEW.start_date, NEW.pickup_date::date, CURRENT_DATE);
-  v_days := GREATEST(1, COALESCE(NULLIF(regexp_replace(NEW.duration, '[^0-9]', '', 'g'), ''), '1')::INT);
-  v_end := COALESCE(NEW.return_date, v_start + (v_days - 1));
+    -- Require a vehicle registration
+    IF NEW.vehicle_reg IS NULL OR btrim(NEW.vehicle_reg) = '' THEN
+        RAISE EXCEPTION 'Vehicle registration is required'
+            USING ERRCODE = '23502';
+    END IF;
 
-  NEW.start_date := v_start;
-  NEW.return_date := v_end;
+    -- Serialize transactions for the same vehicle
+    PERFORM pg_advisory_xact_lock(
+        hashtext(upper(btrim(NEW.vehicle_reg)))
+    );
 
-  -- Check for existing active overlapping bookings for the same vehicle
-  -- (Now holding the lock, so any transaction that just committed will be visible)
-  SELECT id, booking_code, pickup_date, duration, start_date, return_date INTO v_conflict
-  FROM public.bookings
-  WHERE vehicle_reg = NEW.vehicle_reg
-    AND journey_status != 'Cancelled'
-    AND id != NEW.id
-    AND (
-      v_start <= COALESCE(return_date, (pickup_date::date + GREATEST(0, COALESCE(NULLIF(regexp_replace(duration, '[^0-9]', '', 'g'), ''), '1')::INT - 1)))
-      AND
-      v_end >= COALESCE(start_date, pickup_date::date)
-    )
-  LIMIT 1;
+    -- Derive the booking interval
+    v_start := COALESCE(
+        NEW.start_date,
+        NEW.pickup_date::date,
+        CURRENT_DATE
+    );
 
-  IF FOUND THEN
-    RAISE EXCEPTION 'Vehicle % is already confirmed for booking % covering % to %. Overlapping multi-day reservations are prohibited.',
-      NEW.vehicle_reg, v_conflict.booking_code, COALESCE(v_conflict.start_date, v_conflict.pickup_date::date), COALESCE(v_conflict.return_date, (v_conflict.pickup_date::date + GREATEST(0, COALESCE(NULLIF(regexp_replace(v_conflict.duration, '[^0-9]', '', 'g'), ''), '1')::INT - 1)))
-      USING ERRCODE = '23P01'; -- PostgreSQL exclusion_violation
-  END IF;
+    v_days := GREATEST(
+        1,
+        COALESCE(
+            NULLIF(
+                regexp_replace(
+                    COALESCE(NEW.duration, ''),
+                    '[^0-9]',
+                    '',
+                    'g'
+                ),
+                ''
+            ),
+            '1'
+        )::INT
+    );
 
-  RETURN NEW;
+    v_end := COALESCE(
+        NEW.return_date,
+        v_start + (v_days - 1)
+    );
+
+    IF v_end < v_start THEN
+        RAISE EXCEPTION 'Return date cannot precede start date'
+            USING ERRCODE = '22007';
+    END IF;
+
+    NEW.start_date := v_start;
+    NEW.return_date := v_end;
+
+    -- Reject overlapping non-cancelled bookings.
+    -- The advisory lock serializes concurrent writes for this vehicle.
+    SELECT
+        b.id,
+        b.booking_code,
+        COALESCE(b.start_date, b.pickup_date::date) AS conflict_start,
+        COALESCE(
+            b.return_date,
+            b.pickup_date::date
+                + GREATEST(
+                    0,
+                    COALESCE(
+                        NULLIF(
+                            regexp_replace(
+                                COALESCE(b.duration, ''),
+                                '[^0-9]',
+                                '',
+                                'g'
+                            ),
+                            ''
+                        ),
+                        '1'
+                    )::INT - 1
+                )
+        ) AS conflict_end
+    INTO v_conflict
+    FROM public.bookings AS b
+    WHERE upper(btrim(b.vehicle_reg)) =
+          upper(btrim(NEW.vehicle_reg))
+      AND b.journey_status IS DISTINCT FROM 'Cancelled'
+      AND (TG_OP = 'INSERT' OR b.id IS DISTINCT FROM NEW.id)
+      AND v_start <= COALESCE(
+            b.return_date,
+            b.pickup_date::date
+                + GREATEST(
+                    0,
+                    COALESCE(
+                        NULLIF(
+                            regexp_replace(
+                                COALESCE(b.duration, ''),
+                                '[^0-9]',
+                                '',
+                                'g'
+                            ),
+                            ''
+                        ),
+                        '1'
+                    )::INT - 1
+                )
+          )
+      AND v_end >= COALESCE(b.start_date, b.pickup_date::date)
+    LIMIT 1;
+
+    IF FOUND THEN
+        RAISE EXCEPTION
+            'Vehicle % already has an overlapping booking (%) from % to %',
+            NEW.vehicle_reg,
+            v_conflict.booking_code,
+            v_conflict.conflict_start,
+            v_conflict.conflict_end
+            USING ERRCODE = '23P01';
+    END IF;
+
+    RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 DROP TRIGGER IF EXISTS trg_check_vehicle_booking_overlap ON public.bookings;
 CREATE TRIGGER trg_check_vehicle_booking_overlap
 BEFORE INSERT OR UPDATE ON public.bookings
 FOR EACH ROW
-EXECUTE FUNCTION trg_prevent_vehicle_booking_overlap();
+EXECUTE FUNCTION public.trg_prevent_vehicle_booking_overlap();
 
 -- ====================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -233,17 +317,17 @@ DROP POLICY IF EXISTS "Bookings Delete" ON public.bookings;
 CREATE POLICY "Public Bookings Read" ON public.bookings FOR SELECT USING (true);
 CREATE POLICY "Traveler Booking Insert" ON public.bookings FOR INSERT WITH CHECK (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
 CREATE POLICY "Traveler Booking Update" ON public.bookings FOR UPDATE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
-CREATE POLICY "Bookings Delete" ON public.bookings FOR DELETE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+CREATE POLICY "Bookings Delete" ON public.bookings FOR DELETE TO authenticated USING (auth.uid()::text = traveler_id);
 
 -- Additional Delete Policies for profiles, vehicles, trip_requests, quotations
 DROP POLICY IF EXISTS "Profiles Delete" ON public.profiles;
-CREATE POLICY "Profiles Delete" ON public.profiles FOR DELETE USING (auth.uid()::text = id OR auth.uid() IS NULL);
+CREATE POLICY "Profiles Delete" ON public.profiles FOR DELETE TO authenticated USING (auth.uid()::text = id);
 
 DROP POLICY IF EXISTS "Vehicles Delete" ON public.vehicles;
-CREATE POLICY "Vehicles Delete" ON public.vehicles FOR DELETE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+CREATE POLICY "Vehicles Delete" ON public.vehicles FOR DELETE TO authenticated USING (auth.uid()::text = operator_id);
 
 DROP POLICY IF EXISTS "Trip Requests Delete" ON public.trip_requests;
-CREATE POLICY "Trip Requests Delete" ON public.trip_requests FOR DELETE USING (auth.uid()::text = traveler_id OR auth.uid() IS NULL);
+CREATE POLICY "Trip Requests Delete" ON public.trip_requests FOR DELETE TO authenticated USING (auth.uid()::text = traveler_id);
 
 DROP POLICY IF EXISTS "Quotations Delete" ON public.quotations;
-CREATE POLICY "Quotations Delete" ON public.quotations FOR DELETE USING (auth.uid()::text = operator_id OR auth.uid() IS NULL);
+CREATE POLICY "Quotations Delete" ON public.quotations FOR DELETE TO authenticated USING (auth.uid()::text = operator_id);
