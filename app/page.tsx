@@ -11,7 +11,6 @@ import ExploreView from "@/components/traveller/ExploreView";
 import TripRequestsMarketplace from "@/components/operator/TripRequestsMarketplace";
 import QuoteSubmitterModal from "@/components/operator/QuoteSubmitterModal";
 import PartnerHubView from "@/components/operator/PartnerHubView";
-import SupabaseModal from "@/components/common/SupabaseModal";
 import { Booking, Quotation, TripRequest, UserRole } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
 import { useAuth } from "@/lib/authContext";
@@ -30,7 +29,6 @@ export default function Home() {
   // Modals
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showQuoteSubmitterModal, setShowQuoteSubmitterModal] = useState(false);
-  const [showDbModal, setShowDbModal] = useState(false);
 
   // Dynamic counts from database
   const [offersCount, setOffersCount] = useState(0);
@@ -128,7 +126,6 @@ export default function Home() {
       <Header
         currentRole={role}
         onRoleChange={handleRoleChange}
-        onOpenDbModal={() => setShowDbModal(true)}
         unreadCount={0}
       />
 
@@ -229,11 +226,7 @@ export default function Home() {
         onQuotationSubmitted={handleQuotationSubmitted}
       />
 
-      {/* Supabase PostgreSQL Cloud Inspector & Migration Modal */}
-      <SupabaseModal
-        isOpen={showDbModal}
-        onClose={() => setShowDbModal(false)}
-      />
+
 
       {/* Fixed Bottom Navigation Bar */}
       <BottomNav

@@ -1,34 +1,25 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Bell, Database, Car, LogIn, UserCheck } from "lucide-react";
+import { Car, LogIn } from "lucide-react";
 import { UserRole } from "@/lib/types";
-import { dataService } from "@/lib/dataService";
 import { useAuth } from "@/lib/authContext";
 import AuthModal from "./common/AuthModal";
 
 interface HeaderProps {
   currentRole: UserRole;
   onRoleChange: (role: UserRole) => void;
-  onOpenDbModal: () => void;
+  onOpenDbModal?: () => void;
   unreadCount?: number;
 }
 
 export default function Header({
   currentRole,
   onRoleChange,
-  onOpenDbModal,
   unreadCount = 0,
 }: HeaderProps) {
   const { user, profile } = useAuth();
-  const [dbStatus, setDbStatus] = useState<{ connected: boolean; hasTables: boolean } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
-
-  useEffect(() => {
-    dataService.checkSupabaseConnection().then((res) => {
-      setDbStatus({ connected: res.connected, hasTables: res.hasTables });
-    });
-  }, []);
 
   return (
     <>
@@ -80,23 +71,8 @@ export default function Header({
             </button>
           </div>
 
-          {/* Right side controls: Supabase status & Auth / Profile */}
+          {/* Right side controls: Auth / Profile */}
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onOpenDbModal}
-              title="Supabase PostgreSQL Connection & Schema"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-teal-50 hover:bg-teal-100 border border-teal-200/80 text-teal-800 transition-colors"
-            >
-              <Database className="w-3.5 h-3.5 text-teal-700" />
-              <span className="hidden sm:inline">Supabase</span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  dbStatus?.connected ? "bg-emerald-500 animate-pulse" : "bg-amber-400"
-                }`}
-              />
-            </button>
-
             {/* Auth trigger / Avatar */}
             {user ? (
               <button
