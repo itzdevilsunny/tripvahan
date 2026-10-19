@@ -22,8 +22,8 @@ export default function BottomNav({
   requestsCount = 8,
 }: BottomNavProps) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-lg py-1 px-2 safe-area-pb">
-      <div className="max-w-md mx-auto flex items-center justify-around">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 shadow-lg py-1 safe-area-pb">
+      <div className="max-w-xl mx-auto px-3 sm:px-4 flex items-center justify-around">
         {/* Explore */}
         <button
           type="button"
