@@ -34,8 +34,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!error && data) {
         setProfile(data as Profile);
-        if (data.role === "operator" || data.role === "traveller") {
-          setRole(data.role);
+        if (data.role === "operator" || data.role === "traveller" || data.role === "admin") {
+          setRole(data.role as UserRole);
         }
       } else {
         const isOperator = (userMeta?.role as UserRole) === "operator";

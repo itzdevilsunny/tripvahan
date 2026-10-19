@@ -303,6 +303,78 @@ class DataService {
 
     return newBooking;
   }
+
+  async cancelBooking(bookingId: string): Promise<boolean> {
+    try {
+      // Resolve caller's auth token to authenticate with the server-side API
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
+      const res = await fetch("/api/bookings", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ id: bookingId, journey_status: "Cancelled" }),
+      });
+
+      if (res.ok) return true;
+
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.error || `Cancellation failed with status ${res.status}`);
+    } catch (err: any) {
+      console.error("Secure cancelBooking failed:", err);
+      // NOTE: Direct client-side Supabase update fallback has been permanently removed
+      // to ensure all cancellations execute atomic cascades and enforce server-side ownership.
+      throw err;
+    }
+  }
+
+  // --- ADMIN VERIFICATION ---
+  async getAdminOperators(): Promise<any[]> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {};
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
+      const res = await fetch("/api/admin/operators", { headers });
+      if (res.ok) {
+        const json = await res.json();
+        return json.data || [];
+      }
+    } catch (err) {
+      console.warn("getAdminOperators failed:", err);
+    }
+    return [];
+  }
+
+  async reviewOperator(
+    operatorId: string,
+    action: "approve" | "reject",
+    reason?: string,
+    notes?: string
+  ): Promise<any> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (session?.access_token) {
+      headers["Authorization"] = `Bearer ${session.access_token}`;
+    }
+
+    const res = await fetch("/api/admin/operators", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        operator_id: operatorId,
+        action,
+        reason,
+        notes,
+      }),
+    });
+    return await res.json();
+  }
 }
 
 export const dataService = new DataService();

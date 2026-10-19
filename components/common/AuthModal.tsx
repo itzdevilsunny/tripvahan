@@ -74,26 +74,26 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden relative">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl max-w-md w-full shadow-xl border border-[#E5EAF0] overflow-hidden relative">
         {/* Header */}
-        <div className="bg-[#004d40] text-white p-6 relative">
+        <div className="bg-[#075E54] text-white p-6 relative">
           <button
             onClick={onClose}
-            className="absolute top-5 right-5 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+            className="absolute top-5 right-5 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
 
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] uppercase font-bold tracking-wider bg-emerald-400/20 text-emerald-300 px-2 py-0.5 rounded-full">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-[11px] uppercase font-medium tracking-wider bg-white/15 text-white px-2.5 py-0.5 rounded-full">
               Tripvahan Security
             </span>
           </div>
-          <h2 className="text-xl font-black tracking-tight">
+          <h2 className="text-lg sm:text-xl font-semibold tracking-tight">
             {user ? "Your Tripvahan Profile" : mode === "signin" ? "Welcome Back" : "Create Your Account"}
           </h2>
-          <p className="text-xs text-emerald-100/80 mt-1">
+          <p className="text-xs text-emerald-100/90 mt-1 font-normal">
             {user
               ? "Connected to verified Supabase PostgreSQL session"
               : mode === "signin"
@@ -107,22 +107,22 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
           {user ? (
             /* Logged in state */
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+              <div className="p-4 rounded-2xl bg-[#F7F8FA] border border-[#E5EAF0]">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-[#004d40] text-white flex items-center justify-center font-bold text-base">
+                  <div className="w-12 h-12 rounded-full bg-[#075E54] text-white flex items-center justify-center font-semibold text-base">
                     {profile?.full_name?.charAt(0) || user.email?.charAt(0) || "U"}
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900">
+                    <h3 className="text-sm font-semibold text-[#172B2A]">
                       {profile?.full_name || "Tripvahan Member"}
                     </h3>
-                    <p className="text-xs text-slate-500">{user.email}</p>
+                    <p className="text-xs text-[#718096]">{user.email}</p>
                     <div className="mt-1 flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 uppercase">
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-[#DDF7ED] text-[#075E54] uppercase">
                         {role === "operator" ? "Commercial Fleet Partner" : "Traveller"}
                       </span>
                       {profile?.operator_name && (
-                        <span className="text-[10px] font-semibold text-slate-600">
+                        <span className="text-[11px] font-medium text-[#718096]">
                           {profile.operator_name}
                         </span>
                       )}
@@ -131,12 +131,12 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 </div>
               </div>
 
-              <div className="bg-emerald-50 border border-emerald-200/80 rounded-2xl p-3 flex items-start gap-2.5 text-xs text-emerald-900">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="bg-[#DDF7ED]/40 border border-[#075E54]/20 rounded-2xl p-3.5 flex items-start gap-2.5 text-xs text-[#172B2A]">
+                <CheckCircle2 className="w-4 h-4 text-[#075E54] shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold">Active Supabase Auth Session</p>
-                  <p className="text-emerald-700 text-[11px] mt-0.5">
-                    User UID: <span className="font-mono text-[10px]">{user.id.slice(0, 16)}...</span>
+                  <p className="font-semibold text-[#172B2A]">Active Session</p>
+                  <p className="text-[#718096] text-[11px] mt-0.5">
+                    User ID: <span className="font-mono text-[10px] text-[#172B2A]">{user.id.slice(0, 16)}...</span>
                   </p>
                 </div>
               </div>
@@ -144,7 +144,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <button
                 type="button"
                 onClick={handleSignOut}
-                className="w-full py-3 px-4 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs flex items-center justify-center gap-2 transition-colors"
+                className="w-full py-2.5 px-4 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
                 Sign Out of Account
@@ -161,8 +161,8 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               )}
 
               {successMsg && (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2 text-xs text-emerald-700">
-                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+                <div className="p-3 rounded-xl bg-[#DDF7ED] border border-[#075E54]/20 flex items-start gap-2 text-xs text-[#075E54]">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-[#075E54]" />
                   <span>{successMsg}</span>
                 </div>
               )}
@@ -171,17 +171,17 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 <>
                   {/* Role Selector */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    <label className="block text-xs font-medium text-[#172B2A] mb-1.5">
                       Select Account Type
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
                         onClick={() => setSelectedRole("traveller")}
-                        className={`p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                        className={`p-2.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
                           selectedRole === "traveller"
-                            ? "bg-[#004d40] text-white border-[#004d40] shadow-xs"
-                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                            ? "bg-[#075E54] text-white border-[#075E54] shadow-xs"
+                            : "bg-[#F7F8FA] text-[#718096] border-[#E5EAF0] hover:text-[#172B2A]"
                         }`}
                       >
                         Traveller / Group
@@ -189,10 +189,10 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                       <button
                         type="button"
                         onClick={() => setSelectedRole("operator")}
-                        className={`p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                        className={`p-2.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
                           selectedRole === "operator"
-                            ? "bg-[#004d40] text-white border-[#004d40] shadow-xs"
-                            : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                            ? "bg-[#075E54] text-white border-[#075E54] shadow-xs"
+                            : "bg-[#F7F8FA] text-[#718096] border-[#E5EAF0] hover:text-[#172B2A]"
                         }`}
                       >
                         Fleet Partner
@@ -202,18 +202,18 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
                   {/* Full Name */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label className="block text-xs font-medium text-[#172B2A] mb-1">
                       Full Name
                     </label>
                     <div className="relative">
-                      <User className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                      <User className="w-4 h-4 text-[#718096] absolute left-3 top-3" />
                       <input
                         type="text"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
                         placeholder="e.g. Rohan Sharma"
                         required
-                        className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5EAF0] text-xs text-[#172B2A] focus:outline-none focus:border-[#075E54]"
                       />
                     </div>
                   </div>
@@ -221,18 +221,18 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   {/* Operator Business Name */}
                   {selectedRole === "operator" && (
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                      <label className="block text-xs font-medium text-[#172B2A] mb-1">
                         Transport / Fleet Company Name
                       </label>
                       <div className="relative">
-                        <Building className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                        <Building className="w-4 h-4 text-[#718096] absolute left-3 top-3" />
                         <input
                           type="text"
                           value={operatorName}
                           onChange={(e) => setOperatorName(e.target.value)}
                           placeholder="e.g. Rajputana Mobility Solutions"
                           required
-                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
+                          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5EAF0] text-xs text-[#172B2A] focus:outline-none focus:border-[#075E54]"
                         />
                       </div>
                     </div>
@@ -242,29 +242,29 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
               {/* Email */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-medium text-[#172B2A] mb-1">
                   Email Address
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <Mail className="w-4 h-4 text-[#718096] absolute left-3 top-3" />
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@domain.com"
                     required
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5EAF0] text-xs text-[#172B2A] focus:outline-none focus:border-[#075E54]"
                   />
                 </div>
               </div>
 
               {/* Password */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-medium text-[#172B2A] mb-1">
                   Password
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <Lock className="w-4 h-4 text-[#718096] absolute left-3 top-3" />
                   <input
                     type="password"
                     value={password}
@@ -272,7 +272,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     placeholder="••••••••"
                     required
                     minLength={6}
-                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-[#E5EAF0] text-xs text-[#172B2A] focus:outline-none focus:border-[#075E54]"
                   />
                 </div>
               </div>
@@ -281,7 +281,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <button
                 type="submit"
                 disabled={submitting}
-                className="w-full py-3 px-4 rounded-xl bg-[#004d40] hover:bg-[#00382f] text-white font-extrabold text-xs shadow-md shadow-teal-900/10 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                className="w-full py-2.5 px-4 rounded-xl bg-[#075E54] hover:bg-[#064e46] text-white font-medium text-xs sm:text-sm shadow-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
               >
                 {submitting ? (
                   <span>Processing...</span>
@@ -301,7 +301,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               {/* Mode switcher */}
               <div className="text-center pt-2">
                 {mode === "signin" ? (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[#718096]">
                     Don&apos;t have an account?{" "}
                     <button
                       type="button"
@@ -309,13 +309,13 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                         setMode("signup");
                         setErrorMsg(null);
                       }}
-                      className="text-[#00594c] font-bold hover:underline"
+                      className="text-[#075E54] font-medium hover:underline cursor-pointer"
                     >
                       Sign Up
                     </button>
                   </p>
                 ) : (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[#718096]">
                     Already registered?{" "}
                     <button
                       type="button"
@@ -323,7 +323,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                         setMode("signin");
                         setErrorMsg(null);
                       }}
-                      className="text-[#00594c] font-bold hover:underline"
+                      className="text-[#075E54] font-medium hover:underline cursor-pointer"
                     >
                       Sign In
                     </button>
@@ -337,3 +337,4 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     </div>
   );
 }
+

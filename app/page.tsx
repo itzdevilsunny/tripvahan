@@ -11,6 +11,7 @@ import ExploreView from "@/components/traveller/ExploreView";
 import TripRequestsMarketplace from "@/components/operator/TripRequestsMarketplace";
 import QuoteSubmitterModal from "@/components/operator/QuoteSubmitterModal";
 import PartnerHubView from "@/components/operator/PartnerHubView";
+import AdminVerificationDashboard from "@/components/admin/AdminVerificationDashboard";
 import { Booking, Quotation, TripRequest, UserRole } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
 import { useAuth } from "@/lib/authContext";
@@ -68,7 +69,7 @@ export default function Home() {
       if (currentTab === "requests" || currentTab === "partner_hub") {
         setCurrentTab("offers");
       }
-    } else {
+    } else if (newRole === "operator") {
       if (currentTab === "plan" || currentTab === "offers" || currentTab === "bookings") {
         setCurrentTab("requests");
       }
@@ -121,7 +122,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f4f6fa] flex flex-col text-slate-900 selection:bg-teal-100 selection:text-teal-900">
+    <div className="min-h-screen bg-[#F7F8FA] flex flex-col text-[#172B2A] selection:bg-[#DDF7ED] selection:text-[#075E54]">
       {/* Sticky Header with Two-Sided Switcher & Auth */}
       <Header
         currentRole={role}
@@ -131,12 +132,12 @@ export default function Home() {
 
       {/* Floating Action Toast */}
       {toastMessage && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-slate-700 animate-in fade-in slide-in-from-top-4 duration-300">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-          <p className="text-xs font-medium leading-snug flex-1">{toastMessage}</p>
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] bg-[#172B2A] text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-slate-700 animate-in fade-in slide-in-from-top-4 duration-300">
+          <CheckCircle2 className="w-5 h-5 text-[#DDF7ED] shrink-0" />
+          <p className="text-xs font-normal leading-snug flex-1">{toastMessage}</p>
           <button
             onClick={() => setToastMessage(null)}
-            className="text-slate-400 hover:text-white text-xs font-bold"
+            className="text-slate-400 hover:text-white text-xs font-bold cursor-pointer"
           >
             ✕
           </button>
@@ -144,7 +145,7 @@ export default function Home() {
       )}
 
       {/* Main View Area */}
-      <main className="flex-1 w-full max-w-2xl mx-auto pt-2">
+      <main className="flex-1 w-full">
         {/* Traveller Views */}
         {role === "traveller" && (
           <>
@@ -204,6 +205,11 @@ export default function Home() {
             )}
           </>
         )}
+
+        {/* Admin Verification Dashboard */}
+        {role === "admin" && (
+          <AdminVerificationDashboard />
+        )}
       </main>
 
       {/* Booking Review & Lock Modal */}
@@ -226,16 +232,16 @@ export default function Home() {
         onQuotationSubmitted={handleQuotationSubmitted}
       />
 
-
-
-      {/* Fixed Bottom Navigation Bar */}
-      <BottomNav
-        currentTab={currentTab}
-        onTabChange={(tab) => setCurrentTab(tab)}
-        role={role}
-        offersCount={offersCount}
-        requestsCount={requestsCount}
-      />
+      {/* Fixed Bottom Navigation Bar (Hidden in Admin Console) */}
+      {role !== "admin" && (
+        <BottomNav
+          currentTab={currentTab}
+          onTabChange={(tab) => setCurrentTab(tab)}
+          role={role}
+          offersCount={offersCount}
+          requestsCount={requestsCount}
+        />
+      )}
     </div>
   );
 }

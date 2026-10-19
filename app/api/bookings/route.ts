@@ -70,6 +70,62 @@ export async function POST(req: Request) {
       );
     }
 
+    // Resolve caller identity: prioritize authenticated user token if supplied
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    let verifiedCallerId = traveler_id || null;
+
+    if (token) {
+      try {
+        const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+        if (!authErr && authData?.user) {
+          verifiedCallerId = authData.user.id;
+        }
+      } catch {
+        // Fall back to body traveler_id if auth service unavailable
+      }
+    }
+
+    // 1. Attempt PostgreSQL atomic booking confirmation transaction if installed
+    try {
+      const { data: rpcBooking, error: rpcErr } = await supabase.rpc("confirm_booking_transaction", {
+        p_trip_request_id: trip_request_id,
+        p_quotation_id: quotation_id,
+        p_caller_id: verifiedCallerId,
+      });
+
+      if (!rpcErr && rpcBooking) {
+        return NextResponse.json({ data: rpcBooking, database_synced: true, atomic: true }, { status: 201 });
+      }
+
+      // If RPC returned a known business logic or constraint error from PostgreSQL, map to HTTP status
+      if (rpcErr && rpcErr.code !== "PGRST202") {
+        const isConflict =
+          rpcErr.code === "23P01" ||
+          rpcErr.code === "23505" ||
+          (rpcErr.message && (
+            rpcErr.message.includes("already") ||
+            rpcErr.message.includes("Overlapping") ||
+            rpcErr.message.includes("booked")
+          ));
+
+        const isForbidden =
+          rpcErr.code === "42501" ||
+          (rpcErr.message && (
+            rpcErr.message.includes("Forbidden") ||
+            rpcErr.message.includes("Unauthorized") ||
+            rpcErr.message.includes("verified")
+          ));
+
+        return NextResponse.json(
+          { error: rpcErr.message, code: rpcErr.code },
+          { status: isConflict ? 409 : (isForbidden ? 403 : 400) }
+        );
+      }
+    } catch {
+      // Fall through to application-layer mutex lock
+    }
+
     const lockKey = (vehicle_reg || "default_vehicle_lock").trim().toUpperCase();
 
     return await withVehicleLock(lockKey, async () => {
@@ -303,50 +359,397 @@ export async function POST(req: Request) {
   }
 }
 
-export async function DELETE(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-    const vehicleReg = searchParams.get("vehicle_reg");
+/**
+ * Pure authorization and state-machine validator for booking deletion/cancellation operations.
+ * Returns { authorized: boolean, statusCode?: number, error?: string, action?: 'cancel' | 'hard_delete' }
+ */
+function validateBookingDeleteAuth(
+  user: { id: string } | null,
+  profile: { role?: string; operator_name?: string } | null,
+  booking: BookingRecord | null,
+  bookingOperatorId?: string | null,
+  hardDelete: boolean = false
+): { authorized: boolean; statusCode?: number; error?: string; action?: "cancel" | "hard_delete" } {
+  if (!user) {
+    return {
+      authorized: false,
+      statusCode: 401,
+      error: "Unauthorized: Valid authentication session required for booking deletion or cancellation",
+    };
+  }
 
-    if (id) {
-      await supabase.from("bookings").delete().eq("id", id);
-      await supabase.from("bookings").update({ journey_status: "Cancelled" }).eq("id", id);
-    } else if (vehicleReg) {
-      await supabase.from("bookings").delete().eq("vehicle_reg", vehicleReg);
-      await supabase.from("bookings").update({ journey_status: "Cancelled" }).eq("vehicle_reg", vehicleReg);
+  if (!booking) {
+    return {
+      authorized: false,
+      statusCode: 404,
+      error: "Booking record not found",
+    };
+  }
+
+  const isTravelerOwner = booking.traveler_id === user.id;
+  const isAssignedOperator =
+    (Boolean(bookingOperatorId) && bookingOperatorId === user.id) ||
+    (Boolean(profile?.operator_name) && profile?.operator_name === booking.operator_name);
+  const isAdmin = profile?.role === "admin";
+
+  if (!isTravelerOwner && !isAssignedOperator && !isAdmin) {
+    return {
+      authorized: false,
+      statusCode: 403,
+      error: "Forbidden: You are not authorized to modify or remove this booking",
+    };
+  }
+
+  if (hardDelete && !isAdmin) {
+    return {
+      authorized: false,
+      statusCode: 403,
+      error: "Forbidden: Only platform administrators are permitted to perform hard deletion of booking records",
+    };
+  }
+
+  if (!hardDelete || !isAdmin) {
+    if (booking.journey_status === "Completed") {
+      return {
+        authorized: false,
+        statusCode: 409,
+        error: "Conflict: Cannot cancel or delete a completed journey",
+      };
     }
 
-    return NextResponse.json({ success: true });
+    if (booking.journey_status === "Cancelled") {
+      return {
+        authorized: false,
+        statusCode: 409,
+        error: "Conflict: Booking is already cancelled. Historical records are preserved for audit and compliance.",
+      };
+    }
+
+    return { authorized: true, action: "cancel" };
+  }
+
+  return { authorized: true, action: "hard_delete" };
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Unauthorized: Valid authentication token required for booking operations" },
+        { status: 401 }
+      );
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized: Invalid or expired authentication session" },
+        { status: 401 }
+      );
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    const hardDelete = searchParams.get("hard_delete") === "true";
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "Malformed request: Booking ID is required" },
+        { status: 400 }
+      );
+    }
+
+    // Fetch existing booking
+    const { data: booking, error: fetchErr } = await supabase
+      .from("bookings")
+      .select("id, traveler_id, quotation_id, trip_request_id, operator_name, vehicle_reg, journey_status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr || !booking) {
+      return NextResponse.json(
+        { error: "Booking record not found" },
+        { status: 404 }
+      );
+    }
+
+    // Fetch user profile
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, role, operator_name")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    // Look up assigned operator id from quotation
+    let bookingOperatorId: string | null = null;
+    if (booking.quotation_id) {
+      const { data: qData } = await supabase
+        .from("quotations")
+        .select("operator_id")
+        .eq("id", booking.quotation_id)
+        .maybeSingle();
+      if (qData) bookingOperatorId = qData.operator_id;
+    }
+
+    const authCheck = validateBookingDeleteAuth(user, profile, booking, bookingOperatorId, hardDelete);
+    if (!authCheck.authorized) {
+      return NextResponse.json(
+        { error: authCheck.error },
+        { status: authCheck.statusCode || 403 }
+      );
+    }
+
+    // Prefer cancellation workflow over hard deletion
+    if (authCheck.action === "cancel") {
+      // ATOMIC TRANSACTION FIRST: Attempt PostgreSQL stored procedure public.cancel_booking_transaction(...)
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc("cancel_booking_transaction", {
+          p_booking_id: id,
+          p_reason: searchParams.get("reason") || "Cancelled via booking management",
+          p_caller_id: user.id,
+        });
+
+        if (!rpcError && rpcData) {
+          return NextResponse.json({
+            success: true,
+            action: "cancelled",
+            message: "Booking successfully cancelled in accordance with platform policy (atomic transaction)",
+            data: rpcData,
+            transaction_guaranteed: true,
+          });
+        }
+        if (rpcError && rpcError.code === "42501") {
+          return NextResponse.json({ error: rpcError.message }, { status: 403 });
+        }
+        if (rpcError && rpcError.code === "22023") {
+          return NextResponse.json({ error: rpcError.message }, { status: 409 });
+        }
+      } catch {
+        // Fallback to application-level mutex when RPC not installed
+      }
+
+      const lockKey = (booking.vehicle_reg || id).trim().toUpperCase();
+      return await withVehicleLock(lockKey, async () => {
+        const { data: updatedBooking, error: cancelErr } = await supabase
+          .from("bookings")
+          .update({ journey_status: "Cancelled" })
+          .eq("id", id)
+          .select()
+          .single();
+
+        if (cancelErr) {
+          return NextResponse.json(
+            { error: cancelErr.message, code: cancelErr.code },
+            { status: 422 }
+          );
+        }
+
+        // Cascade reset trip and quote
+        try {
+          if (booking.trip_request_id) {
+            await supabase
+              .from("trip_requests")
+              .update({ status: "open" })
+              .eq("id", booking.trip_request_id)
+              .eq("status", "confirmed");
+          }
+          if (booking.quotation_id) {
+            await supabase
+              .from("quotations")
+              .update({ status: "pending" })
+              .eq("id", booking.quotation_id)
+              .eq("status", "accepted");
+          }
+        } catch (cascadeErr) {
+          console.warn("Cascade reset error during cancellation:", cascadeErr);
+        }
+
+        return NextResponse.json({
+          success: true,
+          action: "cancelled",
+          message: "Booking successfully cancelled in accordance with platform policy",
+          data: updatedBooking,
+        });
+      });
+    }
+
+    if (authCheck.action === "hard_delete") {
+      const { error: delErr } = await supabase.from("bookings").delete().eq("id", id);
+      if (delErr) {
+        return NextResponse.json(
+          { error: delErr.message, code: delErr.code },
+          { status: 422 }
+        );
+      }
+      return NextResponse.json({
+        success: true,
+        action: "deleted",
+        message: "Booking record purged by platform administrator",
+      });
+    }
+
+    return NextResponse.json({ error: "Invalid operation" }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
+interface BookingAuthContext {
+  userId: string;
+  role?: string;
+  operatorName?: string;
+}
+
+interface BookingRecord {
+  id: string;
+  traveler_id: string;
+  quotation_id: string;
+  trip_request_id: string;
+  operator_name: string;
+  vehicle_reg: string;
+  journey_status: string;
+}
+
+/**
+ * Pure authorization and state-machine validator for booking transitions.
+ * Returns { authorized: boolean, statusCode?: number, error?: string }
+ */
+function validateBookingTransitionAuth(
+  user: { id: string },
+  profile: { role?: string; operator_name?: string } | null,
+  booking: BookingRecord,
+  targetStatus: string,
+  bookingOperatorId?: string | null
+): { authorized: boolean; statusCode?: number; error?: string } {
+  const validStatuses = ["Confirmed", "Dispatched", "Ongoing", "Completed", "Cancelled"];
+  if (!validStatuses.includes(targetStatus)) {
+    return {
+      authorized: false,
+      statusCode: 400,
+      error: `Invalid journey_status '${targetStatus}'. Allowed: ${validStatuses.join(", ")}`,
+    };
+  }
+
+  // Identity checks
+  const isTravelerOwner = booking.traveler_id === user.id;
+  const isAssignedOperator =
+    (Boolean(bookingOperatorId) && bookingOperatorId === user.id) ||
+    (Boolean(profile?.operator_name) && profile?.operator_name === booking.operator_name);
+  const isAdmin = profile?.role === "admin";
+
+  if (!isTravelerOwner && !isAssignedOperator && !isAdmin) {
+    return {
+      authorized: false,
+      statusCode: 403,
+      error: "Forbidden: You are not authorized to modify this booking",
+    };
+  }
+
+  // Idempotency & terminal state checks
+  if (booking.journey_status === targetStatus) {
+    return {
+      authorized: false,
+      statusCode: 409,
+      error: `Booking is already in '${targetStatus}' status`,
+    };
+  }
+
+  if (booking.journey_status === "Cancelled") {
+    return {
+      authorized: false,
+      statusCode: 409,
+      error: "Conflict: Cannot modify a cancelled booking",
+    };
+  }
+
+  if (booking.journey_status === "Completed") {
+    return {
+      authorized: false,
+      statusCode: 409,
+      error: "Conflict: Cannot modify a completed journey",
+    };
+  }
+
+  // Role-based operational action permissions
+  if (targetStatus === "Cancelled") {
+    // Both traveler owner, assigned operator, and admin can cancel
+    return { authorized: true };
+  }
+
+  // Operational status transitions (Dispatched, Ongoing, Completed)
+  if (!isAssignedOperator && !isAdmin) {
+    return {
+      authorized: false,
+      statusCode: 403,
+      error: "Forbidden: Only the assigned fleet operator or administrator can update journey dispatch status",
+    };
+  }
+
+  // State machine sequence rules
+  const VALID_NEXT_STATES: Record<string, string[]> = {
+    Confirmed: ["Dispatched", "Ongoing", "Cancelled"],
+    Dispatched: ["Ongoing", "Cancelled"],
+    Ongoing: ["Completed", "Cancelled"],
+  };
+
+  const allowedTransitions = VALID_NEXT_STATES[booking.journey_status] || [];
+  if (!allowedTransitions.includes(targetStatus)) {
+    return {
+      authorized: false,
+      statusCode: 409,
+      error: `Conflict: Invalid status transition from '${booking.journey_status}' to '${targetStatus}'`,
+    };
+  }
+
+  return { authorized: true };
+}
+
 export async function PATCH(req: Request) {
   try {
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Unauthorized: Valid authentication token required" },
+        { status: 401 }
+      );
+    }
+
+    // Resolve user identity server-side via Supabase Auth
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized: Invalid or expired authentication session" },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
     const { id, journey_status, reason } = body;
 
     if (!id || !journey_status) {
       return NextResponse.json(
-        { error: "Booking ID and journey_status are required" },
+        { error: "Malformed input: Booking ID and journey_status are required" },
         { status: 400 }
       );
     }
 
-    const validStatuses = ["Confirmed", "Ongoing", "Completed", "Cancelled"];
-    if (!validStatuses.includes(journey_status)) {
-      return NextResponse.json(
-        { error: `Invalid journey_status. Allowed values: ${validStatuses.join(", ")}` },
-        { status: 400 }
-      );
-    }
-
-    // Fetch existing booking to verify existence and linkages
+    // Fetch existing booking record
     const { data: existingBooking, error: fetchErr } = await supabase
       .from("bookings")
-      .select("id, trip_request_id, quotation_id, vehicle_reg, journey_status")
+      .select("id, traveler_id, quotation_id, trip_request_id, operator_name, vehicle_reg, journey_status")
       .eq("id", id)
       .maybeSingle();
 
@@ -357,41 +760,129 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const { data, error } = await supabase
-      .from("bookings")
-      .update({ journey_status })
-      .eq("id", id)
-      .select()
-      .single();
+    // Fetch profile of the authenticated user to verify role & operator name
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, role, operator_name")
+      .eq("id", user.id)
+      .maybeSingle();
 
-    if (error) {
+    // Look up assigned operator id from the quotation
+    let bookingOperatorId: string | null = null;
+    if (existingBooking.quotation_id) {
+      const { data: qData } = await supabase
+        .from("quotations")
+        .select("operator_id")
+        .eq("id", existingBooking.quotation_id)
+        .maybeSingle();
+      if (qData) bookingOperatorId = qData.operator_id;
+    }
+
+    // Server-side authorization & state machine validation
+    const authResult = validateBookingTransitionAuth(
+      user,
+      profile,
+      existingBooking,
+      journey_status,
+      bookingOperatorId
+    );
+
+    if (!authResult.authorized) {
       return NextResponse.json(
-        { error: error.message, code: error.code },
-        { status: 422 }
+        { error: authResult.error },
+        { status: authResult.statusCode || 403 }
       );
     }
 
-    // If cancelled, reset trip request back to open and quotation to pending
+    // If transitioning to Cancelled, attempt PostgreSQL stored procedure public.cancel_booking_transaction(...)
     if (journey_status === "Cancelled") {
       try {
-        if (existingBooking.trip_request_id) {
-          await supabase
-            .from("trip_requests")
-            .update({ status: "open" })
-            .eq("id", existingBooking.trip_request_id);
+        const { data: rpcData, error: rpcError } = await supabase.rpc("cancel_booking_transaction", {
+          p_booking_id: id,
+          p_reason: reason || "Cancelled via booking status update",
+          p_caller_id: user.id,
+        });
+
+        if (!rpcError && rpcData) {
+          return NextResponse.json({
+            data: rpcData,
+            success: true,
+            message: `Booking successfully transitioned to Cancelled (atomic transaction)`,
+            transaction_guaranteed: true,
+          });
         }
-        if (existingBooking.quotation_id) {
-          await supabase
-            .from("quotations")
-            .update({ status: "pending" })
-            .eq("id", existingBooking.quotation_id);
+        if (rpcError && rpcError.code === "42501") {
+          return NextResponse.json({ error: rpcError.message }, { status: 403 });
+        }
+        if (rpcError && rpcError.code === "22023") {
+          return NextResponse.json({ error: rpcError.message }, { status: 409 });
         }
       } catch {
-        // Non-fatal cascade
+        // Fallback to application mutex
       }
     }
 
-    return NextResponse.json({ data, success: true });
+    // Serialize concurrent booking modifications via vehicle mutex lock
+    const lockKey = (existingBooking.vehicle_reg || id).trim().toUpperCase();
+
+    return await withVehicleLock(lockKey, async () => {
+      // Re-fetch under lock to guarantee concurrency safety
+      const { data: freshBooking } = await supabase
+        .from("bookings")
+        .select("id, journey_status")
+        .eq("id", id)
+        .single();
+
+      if (freshBooking && freshBooking.journey_status === journey_status) {
+        return NextResponse.json(
+          { error: `Conflict: Booking was already transitioned to '${journey_status}'` },
+          { status: 409 }
+        );
+      }
+
+      // Execute update on booking
+      const { data: updatedBooking, error: updateErr } = await supabase
+        .from("bookings")
+        .update({ journey_status })
+        .eq("id", id)
+        .select()
+        .single();
+
+      if (updateErr) {
+        return NextResponse.json(
+          { error: updateErr.message, code: updateErr.code },
+          { status: 422 }
+        );
+      }
+
+      // If cancelled, execute cascade cleanup safely and conditionally
+      if (journey_status === "Cancelled") {
+        try {
+          if (existingBooking.trip_request_id) {
+            await supabase
+              .from("trip_requests")
+              .update({ status: "open" })
+              .eq("id", existingBooking.trip_request_id)
+              .eq("status", "confirmed");
+          }
+          if (existingBooking.quotation_id) {
+            await supabase
+              .from("quotations")
+              .update({ status: "pending" })
+              .eq("id", existingBooking.quotation_id)
+              .eq("status", "accepted");
+          }
+        } catch (cascadeErr) {
+          console.warn("Cascade reset error during cancellation:", cascadeErr);
+        }
+      }
+
+      return NextResponse.json({
+        data: updatedBooking,
+        success: true,
+        message: `Booking successfully transitioned to ${journey_status}`,
+      });
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

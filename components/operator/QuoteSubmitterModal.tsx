@@ -79,6 +79,10 @@ export default function QuoteSubmitterModal({
 
   const handleSubmit = async () => {
     setErrorMsg(null);
+    if (profile && profile.verified === false) {
+      setErrorMsg("Compliance Verification Required: Unverified fleet operators cannot submit quotes to passenger circuits until approved by platform administrators.");
+      return;
+    }
     if (!selectedVehicle?.id) {
       setErrorMsg("No commercial vehicle selected. Please register a vehicle in the Fleet Console before quoting.");
       return;
@@ -132,38 +136,50 @@ export default function QuoteSubmitterModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden my-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl max-w-lg w-full shadow-xl border border-[#E5EAF0] overflow-hidden my-6">
         {/* Header Bar */}
-        <div className="bg-[#004d40] px-5 py-4 text-white flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-white/10 text-emerald-300">
+        <div className="bg-[#075E54] px-5 py-4 text-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-white/10 text-white">
               <Car className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-teal-200 uppercase tracking-wider">
+                <span className="text-xs font-semibold text-[#DDF7ED] uppercase tracking-wider">
                   Req #{tripRequest.trip_code}
                 </span>
-                <span className="text-[10px] bg-red-500/80 text-white px-2 py-0.5 rounded-full flex items-center gap-1 font-semibold">
+                <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full flex items-center gap-1 font-medium">
                   <Clock className="w-2.5 h-2.5" /> Open for Bids
                 </span>
               </div>
-              <h3 className="font-extrabold text-base leading-tight mt-0.5">
-                {tripRequest.traveler_name} • {tripRequest.travellers_count} Guests
+              <h3 className="font-semibold text-sm sm:text-base leading-tight mt-0.5">
+                {tripRequest.traveler_name} · {tripRequest.travellers_count} Guests
               </h3>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-white/10 text-teal-200 hover:text-white transition-colors"
+            className="p-1.5 rounded-full hover:bg-white/10 text-emerald-100 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content Body */}
-        <div className="p-4 sm:p-5 space-y-4 max-h-[80vh] overflow-y-auto text-sm">
+        <div className="p-4 sm:p-5 space-y-4 max-h-[80vh] overflow-y-auto text-xs sm:text-sm">
+          {profile?.verified === false && (
+            <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold block text-amber-900">Operator Verification Pending</span>
+                <span className="text-[11px] text-amber-700 leading-relaxed block mt-0.5">
+                  Your fleet documents are under review by platform administrators. Bidding on public trip requests will be unlocked as soon as your commercial yellow board and tourist permits are approved.
+                </span>
+              </div>
+            </div>
+          )}
+
           {errorMsg && (
             <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
@@ -172,57 +188,57 @@ export default function QuoteSubmitterModal({
           )}
 
           {/* Trip Summary strip */}
-          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/90 flex items-center justify-between text-xs">
+          <div className="bg-[#F7F8FA] rounded-xl p-3 sm:p-3.5 border border-[#E5EAF0] flex items-center justify-between text-xs">
             <div>
-              <span className="text-[10px] text-slate-500 block">Duration</span>
-              <span className="font-bold text-slate-900">{tripRequest.duration}</span>
+              <span className="text-[11px] text-[#718096] block">Duration</span>
+              <span className="font-semibold text-[#172B2A]">{tripRequest.duration}</span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-500 block">Plan Est.</span>
-              <span className="font-bold text-slate-900">{tripRequest.distance_km} km</span>
+              <span className="text-[11px] text-[#718096] block">Plan Est.</span>
+              <span className="font-semibold text-[#172B2A]">{tripRequest.distance_km} km</span>
             </div>
             <div>
-              <span className="text-[10px] text-slate-500 block">Capacity Req.</span>
-              <span className="font-bold text-slate-900">{tripRequest.travellers_count}+ Pax</span>
+              <span className="text-[11px] text-[#718096] block">Capacity Req.</span>
+              <span className="font-semibold text-[#172B2A]">{tripRequest.travellers_count}+ Pax</span>
             </div>
           </div>
 
           {/* Section 1: Assign Fleet Vehicle */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                <span className="w-6 h-6 rounded-full bg-[#004d40] text-white flex items-center justify-center text-xs">
+              <div className="flex items-center gap-2 font-semibold text-[#172B2A] text-xs sm:text-sm">
+                <span className="w-5 h-5 rounded-full bg-[#075E54] text-white flex items-center justify-center text-[11px]">
                   1
                 </span>
                 <span>Assign Fleet Vehicle</span>
               </div>
-              <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full">
+              <span className="text-[11px] font-medium text-[#075E54] bg-[#DDF7ED] px-2.5 py-0.5 rounded-full">
                 {vehicles.length} Vehicle Available
               </span>
             </div>
 
             {vehicles.length === 0 ? (
               <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 space-y-1.5">
-                <div className="flex items-center gap-2 font-bold text-xs">
+                <div className="flex items-center gap-2 font-semibold text-xs">
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>No Registered Fleet Vehicles</span>
                 </div>
-                <p className="text-[11px] text-amber-800 leading-relaxed">
-                  You have not registered any commercial vehicles yet. Please open the Fleet Console to register your commercial vehicle before submitting quotations.
+                <p className="text-xs text-amber-800 leading-relaxed">
+                  You have not registered any commercial vehicles yet. Please open the Fleet Console to register your vehicle before submitting quotations.
                 </p>
               </div>
             ) : (
-              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
+              <div className="p-3.5 rounded-xl border border-[#E5EAF0] bg-[#F7F8FA] space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-lg bg-teal-100 text-[#00594c]">
-                      <Car className="w-5 h-5" />
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-[#DDF7ED] text-[#075E54]">
+                      <Car className="w-4 h-4" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-slate-900 text-xs sm:text-sm">
+                      <h4 className="font-semibold text-[#172B2A] text-xs sm:text-sm">
                         {selectedVehicle?.name}
                       </h4>
-                      <p className="text-[11px] text-slate-500 font-mono">
+                      <p className="text-xs text-[#718096] font-mono">
                         {selectedVehicle?.registration_number}
                       </p>
                     </div>
@@ -232,7 +248,7 @@ export default function QuoteSubmitterModal({
                     <select
                       value={selectedVehicleId}
                       onChange={(e) => setSelectedVehicleId(e.target.value)}
-                      className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700"
+                      className="text-xs bg-white border border-[#E5EAF0] rounded-lg px-2.5 py-1 font-medium text-[#172B2A]"
                     >
                       {vehicles.map((v) => (
                         <option key={v.id} value={v.id}>
@@ -244,20 +260,20 @@ export default function QuoteSubmitterModal({
                 </div>
 
                 {/* Requirement Check banner */}
-                <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] text-emerald-900 flex items-center gap-2 font-medium">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <div className="p-2 rounded-lg bg-[#DDF7ED] text-xs text-[#075E54] flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#075E54] shrink-0" />
                   <span>
                     Capacity: {selectedVehicle?.seating_capacity} Seats for{" "}
-                    {tripRequest.travellers_count} Pax • {selectedVehicle?.luggage_capacity} Bags
+                    {tripRequest.travellers_count} Pax · {selectedVehicle?.luggage_capacity} Bags
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1">
-                  <span className="flex items-center gap-1 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                <div className="flex items-center justify-between text-[11px] text-[#718096] pt-0.5">
+                  <span className="flex items-center gap-1 font-medium text-[#172B2A]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#075E54]" />
                     Commercial Yellow Plate Valid
                   </span>
-                  <span className="font-semibold text-blue-700">
+                  <span className="font-medium text-[#075E54]">
                     Speed-Gov: 80 km/h Active
                   </span>
                 </div>
@@ -268,25 +284,25 @@ export default function QuoteSubmitterModal({
           {/* Section 2: Cost Breakdown Calculator */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-                <span className="w-6 h-6 rounded-full bg-[#004d40] text-white flex items-center justify-center text-xs">
+              <div className="flex items-center gap-2 font-semibold text-[#172B2A] text-xs sm:text-sm">
+                <span className="w-5 h-5 rounded-full bg-[#075E54] text-white flex items-center justify-center text-[11px]">
                   2
                 </span>
                 <span>Cost Breakdown Calculator</span>
               </div>
-              <span className="text-[10px] font-semibold text-slate-400">
+              <span className="text-[11px] font-medium text-[#718096]">
                 Auto-Calculated
               </span>
             </div>
 
             <div className="space-y-2.5">
               {/* Base Vehicle & Fuel Rate */}
-              <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
+              <div className="p-3 rounded-xl border border-[#E5EAF0] bg-[#F7F8FA] space-y-1">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 font-medium">
+                  <span className="text-[#718096] font-normal">
                     Base Vehicle & Fuel (for {tripRequest.distance_km} km)
                   </span>
-                  <span className="font-extrabold text-slate-900">
+                  <span className="font-semibold text-[#172B2A]">
                     ₹{baseFuelRate.toLocaleString("en-IN")}
                   </span>
                 </div>
@@ -297,17 +313,17 @@ export default function QuoteSubmitterModal({
                   step={500}
                   value={baseFuelRate}
                   onChange={(e) => setBaseFuelRate(Number(e.target.value))}
-                  className="w-full accent-[#004d40] cursor-pointer"
+                  className="w-full accent-[#075E54] cursor-pointer"
                 />
               </div>
 
               {/* Driver Night Allowance */}
-              <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-1">
+              <div className="p-3 rounded-xl border border-[#E5EAF0] bg-[#F7F8FA] space-y-1">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-600 font-medium">
+                  <span className="text-[#718096] font-normal">
                     Driver Bata & Night Allowance
                   </span>
-                  <span className="font-extrabold text-slate-900">
+                  <span className="font-semibold text-[#172B2A]">
                     ₹{nightAllowance.toLocaleString("en-IN")}
                   </span>
                 </div>
@@ -318,23 +334,23 @@ export default function QuoteSubmitterModal({
                   step={200}
                   value={nightAllowance}
                   onChange={(e) => setNightAllowance(Number(e.target.value))}
-                  className="w-full accent-[#004d40] cursor-pointer"
+                  className="w-full accent-[#075E54] cursor-pointer"
                 />
               </div>
 
               {/* FASTag Tolls & Permits */}
-              <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
+              <div className="p-3 rounded-xl border border-[#E5EAF0] bg-[#F7F8FA] space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-800">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-[#172B2A]">
                     <input
                       type="checkbox"
                       checked={includeTolls}
                       onChange={(e) => setIncludeTolls(e.target.checked)}
-                      className="accent-[#00594c] w-4 h-4 rounded"
+                      className="accent-[#075E54] w-4 h-4 rounded cursor-pointer"
                     />
                     <span>Include Highway Tolls & State Border Permits</span>
                   </label>
-                  <span className="font-extrabold text-slate-900 text-xs">
+                  <span className="font-semibold text-[#172B2A] text-xs">
                     {includeTolls ? `₹${tollsAmount.toLocaleString("en-IN")}` : "Excluded"}
                   </span>
                 </div>
@@ -346,23 +362,23 @@ export default function QuoteSubmitterModal({
                     step={100}
                     value={tollsAmount}
                     onChange={(e) => setTollsAmount(Number(e.target.value))}
-                    className="w-full accent-[#004d40] cursor-pointer"
+                    className="w-full accent-[#075E54] cursor-pointer"
                   />
                 )}
               </div>
 
               {/* Total Quotation Summary */}
-              <div className="p-3.5 rounded-xl bg-teal-50/80 border border-teal-200 flex items-center justify-between">
+              <div className="p-3.5 rounded-xl bg-[#DDF7ED]/40 border border-[#075E54]/20 flex items-center justify-between">
                 <div>
-                  <span className="text-[10px] font-bold text-teal-800 uppercase tracking-wider block">
+                  <span className="text-[11px] font-semibold text-[#075E54] uppercase tracking-wider block">
                     Total Binding Quotation
                   </span>
-                  <span className="text-xs text-slate-600 font-medium">
+                  <span className="text-xs text-[#718096] font-normal">
                     Per passenger share: ₹{perPersonFare.toLocaleString("en-IN")}
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-xl font-black text-[#00594c]">
+                  <span className="text-lg sm:text-xl font-bold text-[#075E54]">
                     ₹{totalQuote.toLocaleString("en-IN")}
                   </span>
                 </div>
@@ -372,22 +388,22 @@ export default function QuoteSubmitterModal({
 
           {/* Section 3: Terms & Operator Note */}
           <div className="space-y-3">
-            <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
-              <span className="w-6 h-6 rounded-full bg-[#004d40] text-white flex items-center justify-center text-xs">
+            <div className="flex items-center gap-2 font-semibold text-[#172B2A] text-xs sm:text-sm">
+              <span className="w-5 h-5 rounded-full bg-[#075E54] text-white flex items-center justify-center text-[11px]">
                 3
               </span>
-              <span>Terms & Organizer Note</span>
+              <span>Terms & Fleet Note</span>
             </div>
 
             {/* Lock Validity */}
             <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 block">
+              <label className="text-xs font-medium text-[#172B2A] block">
                 Quotation Lock Validity
               </label>
               <select
                 value={validityHours}
                 onChange={(e) => setValidityHours(Number(e.target.value))}
-                className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 font-medium"
+                className="w-full text-xs bg-white border border-[#E5EAF0] rounded-lg p-2 font-medium text-[#172B2A] focus:outline-none focus:border-[#075E54]"
               >
                 <option value={24}>24 Hours Locked Price</option>
                 <option value={48}>48 Hours Locked Price (Recommended)</option>
@@ -398,25 +414,25 @@ export default function QuoteSubmitterModal({
             {/* Note to Organizer */}
             <div className="space-y-1">
               <div className="flex justify-between items-center text-xs">
-                <label className="font-semibold text-slate-700">
+                <label className="font-medium text-[#172B2A]">
                   Note to Organizer {tripRequest.traveler_name}
                 </label>
-                <span className="text-[10px] text-slate-500">Visible in traveler app</span>
+                <span className="text-[11px] text-[#718096]">Visible in traveler app</span>
               </div>
               <textarea
                 rows={3}
                 value={operatorNote}
                 onChange={(e) => setOperatorNote(e.target.value)}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-1 focus:ring-teal-600 font-medium"
+                className="w-full text-xs p-2.5 border border-[#E5EAF0] rounded-xl focus:outline-none focus:border-[#075E54] font-normal text-[#172B2A] bg-white"
                 placeholder="Describe your vehicle cleanliness, driver experience, or amenities..."
               />
             </div>
           </div>
 
           {/* Action Bar */}
-          <div className="pt-2 space-y-2">
-            <div className="text-[10px] text-slate-500 flex items-center justify-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+          <div className="pt-2 space-y-2.5">
+            <div className="text-[11px] text-[#718096] flex items-center justify-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#075E54]" />
               Binding quote: 100% honest pricing guarantee. No hidden surcharges.
             </div>
 
@@ -427,7 +443,7 @@ export default function QuoteSubmitterModal({
                   setSavedDraft(true);
                   setTimeout(() => setSavedDraft(false), 2000);
                 }}
-                className="w-1/3 py-3 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl transition-colors"
+                className="w-1/3 py-2.5 border border-[#E5EAF0] bg-white hover:bg-[#F7F8FA] text-[#718096] hover:text-[#172B2A] font-medium text-xs rounded-xl transition-colors cursor-pointer"
               >
                 {savedDraft ? "Saved!" : "Save Draft"}
               </button>
@@ -435,8 +451,8 @@ export default function QuoteSubmitterModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={isSubmitting || vehicles.length === 0}
-                className="flex-1 py-3 bg-[#004d40] hover:bg-[#00382f] active:scale-[0.99] text-white font-bold text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                disabled={isSubmitting || vehicles.length === 0 || profile?.verified === false}
+                className="flex-1 py-2.5 bg-[#075E54] hover:bg-[#064e46] active:scale-[0.99] text-white font-medium text-xs sm:text-sm rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
               >
                 {isSubmitting ? (
                   <span>Sending to Traveler Console...</span>
@@ -445,7 +461,7 @@ export default function QuoteSubmitterModal({
                     <span>
                       Send Binding Quotation ₹{totalQuote.toLocaleString("en-IN")}
                     </span>
-                    <Send className="w-4 h-4" />
+                    <Send className="w-3.5 h-3.5" />
                   </>
                 )}
               </button>
@@ -456,3 +472,4 @@ export default function QuoteSubmitterModal({
     </div>
   );
 }
+

@@ -140,12 +140,19 @@ export async function POST(req: Request) {
         isOperatorVerified = true;
       }
     } catch {
-      // Continue
+      // Continue if table not yet created
     }
 
-    const assignedBadge = isOperatorVerified
-      ? (badge || "Tier-1 Verified Partner")
-      : "Pending Verification";
+    if (!isOperatorVerified) {
+      return NextResponse.json(
+        {
+          error: "Forbidden: Commercial compliance verification required. Unverified fleet partners cannot submit quotations to passenger circuits until approved by platform administrators.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const assignedBadge = badge || "Tier-1 Verified Partner";
 
     const quoteId = `quo_${Date.now()}`;
     const newQuotation = {

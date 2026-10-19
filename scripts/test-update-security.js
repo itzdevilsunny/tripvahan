@@ -1,8 +1,16 @@
 const { createClient } = require("@supabase/supabase-js");
 
 const BASE_URL = process.env.TEST_BASE_URL || "https://tripvahan.vercel.app";
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://ykaorzsoajfwuzibmgoo.supabase.co";
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_EBLp2hLf7wwcb8aiv-ZqTQ_QzW_nqUU";
+const SUPABASE_URL = process.env.STAGING_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_KEY = process.env.STAGING_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
+
+const PRODUCTION_PROJECT_ID = "ykaorzsoajfwuzibmgoo";
+if (!SUPABASE_URL || SUPABASE_URL.includes(PRODUCTION_PROJECT_ID)) {
+  console.error("\n🚨 SAFETY INTERCEPT: Direct probe/execution against production (ykaorzsoajfwuzibmgoo) is prohibited.");
+  console.error("Please supply a dedicated staging or local URL via STAGING_SUPABASE_URL.\n");
+  process.exit(1);
+}
+
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 async function runUpdateSecurityTests() {

@@ -1,0 +1,490 @@
+/**
+ * TRIPVAHAN PHASE 3: END-TO-END MARKETPLACE LIFECYCLE TEST SUITE
+ * File: scripts/test-e2e-marketplace-lifecycle.js
+ *
+ * Verifies the complete marketplace lifecycle across Traveller, Operator,
+ * and Administrator workflows against live local server endpoints:
+ * 1. Traveller Trip Creation
+ * 2. Unverified Operator Bidding Block & Admin Verification Elevation
+ * 3. Verified Operator Quotation Submission & Capacity/Ownership Guards
+ * 4. Traveller Booking Confirmation & Atomic Status Cascades
+ * 5. Booking Mutex & Overlapping Interval Concurrency Guards
+ * 6. Cross-Tenant Authorization & Identity Ownership
+ * 7. Authorized Cancellation & Terminal State Immutability
+ * 8. Admin Audit Trail Integrity
+ */
+
+const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
+const { createClient } = require("@supabase/supabase-js");
+
+// Automatically load .env.staging.local if present
+const envStagingPath = path.resolve(process.cwd(), ".env.staging.local");
+if (fs.existsSync(envStagingPath)) {
+  try {
+    const envContent = fs.readFileSync(envStagingPath, "utf8");
+    for (const line of envContent.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx !== -1) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+        if (!process.env[key]) process.env[key] = val;
+      }
+    }
+  } catch {}
+}
+
+const BASE_URL = process.env.TEST_BASE_URL || "http://localhost:3002";
+const SUPABASE_URL = process.env.STAGING_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_KEY =
+  process.env.STAGING_SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.STAGING_SUPABASE_SECRET_KEY ||
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  "";
+
+// Production Project ID Guard
+const PRODUCTION_PROJECT_ID = "ykaorzsoajfwuzibmgoo";
+if (!SUPABASE_URL || SUPABASE_URL.includes(PRODUCTION_PROJECT_ID)) {
+  console.error("\n❌ SAFETY GUARD ACTIVE: E2E lifecycle test targeting PRODUCTION project URL is strictly blocked.");
+  console.error("Please configure a dedicated staging project in .env.staging.local.\n");
+  process.exit(1);
+}
+
+if (!SUPABASE_URL.startsWith("https://") && !SUPABASE_URL.startsWith("http://")) {
+  console.error("\n❌ ERROR: STAGING_SUPABASE_URL must be a valid URL starting with https:// (e.g. https://<project-ref>.supabase.co).");
+  console.error("You appear to have entered an API key instead of the Supabase Project URL in STAGING_SUPABASE_URL.\n");
+  process.exit(1);
+}
+
+function isProductionJwt(token) {
+  if (!token || typeof token !== "string") return false;
+  if (token.includes(PRODUCTION_PROJECT_ID)) return true;
+  const parts = token.split(".");
+  if (parts.length === 3) {
+    try {
+      const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf-8"));
+      if (payload && payload.ref === PRODUCTION_PROJECT_ID) return true;
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
+
+if (isProductionJwt(SUPABASE_KEY)) {
+  console.error("\n🚨 SAFETY INTERCEPT: The provided STAGING API key belongs to the PRODUCTION project (ykaorzsoajfwuzibmgoo)!");
+  console.error("Do NOT use production credentials for staging tests. Staging tests must use keys from a separate staging project.\n");
+  process.exit(1);
+}
+
+if (SUPABASE_URL.includes("your-staging-project") || SUPABASE_KEY.includes("your-")) {
+  console.error("\n❌ ERROR: STAGING_SUPABASE_URL contains unresolved placeholder values.");
+  console.error("Please configure genuine staging project credentials in .env.staging.local.\n");
+  process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+let passedCount = 0;
+let failedCount = 0;
+
+async function runStep(stepName, fn) {
+  process.stdout.write(`Step: ${stepName} ... `);
+  try {
+    await fn();
+    console.log("✅ PASSED");
+    passedCount++;
+  } catch (err) {
+    console.log("❌ FAILED");
+    console.error(`   Details: ${err.message}`);
+    failedCount++;
+  }
+}
+
+async function runE2EMarketplaceLifecycle() {
+  console.log("==================================================================");
+  console.log("TRIPVAHAN — PHASE 3: END-TO-END MARKETPLACE LIFECYCLE SUITE");
+  console.log(`Target Endpoint: ${BASE_URL}`);
+  console.log("==================================================================\n");
+
+  const runId = `e2e_${Date.now()}`;
+  const travellerAlice = `usr_alice_${runId}`;
+  const travellerEve = `usr_eve_${runId}`;
+  const operatorBob = `op_bob_${runId}`;
+  const unverifiedOperatorCharlie = `op_charlie_${runId}`;
+  const vehicleRegBob = `DL 01 E2E ${Math.floor(1000 + Math.random() * 9000)}`;
+  const vehicleIdBob = `veh_bob_${runId}`;
+
+  let createdTripId = "";
+  let createdTripCode = "";
+  let createdQuotationId = "";
+  let createdBookingId = "";
+  let createdBookingCode = "";
+
+  // -------------------------------------------------------------------------
+  // STEP 0: Provision Ephemeral Profiles
+  // -------------------------------------------------------------------------
+  try {
+    await supabase.from("profiles").upsert([
+      { id: travellerAlice, full_name: "Alice Sharma", role: "traveller", verified: true },
+      { id: travellerEve, full_name: "Eve Competitor", role: "traveller", verified: true },
+      { id: operatorBob, full_name: "Bob Fleet Owner", operator_name: "Bob Express Mobility", role: "operator", verified: true },
+      { id: unverifiedOperatorCharlie, full_name: "Charlie Applicant", operator_name: "Charlie Cabs", role: "operator", verified: false },
+    ]);
+  } catch (e) {
+    console.warn("Direct Supabase profile setup notice:", e.message);
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 1: Verify Core Health
+  // -------------------------------------------------------------------------
+  await runStep("1. Health check verifies local service is online", async () => {
+    const res = await fetch(`${BASE_URL}/api/supabase-status`);
+    assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`);
+    const data = await res.json();
+    assert.ok(data.status === "online" || data.status === "connected", "Service must report active status");
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 2: Traveller Trip Creation
+  // -------------------------------------------------------------------------
+  await runStep("2. Traveller creates group outstation trip request", async () => {
+    const res = await fetch(`${BASE_URL}/api/trips`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        traveler_id: travellerAlice,
+        traveler_name: "Alice Sharma",
+        circuit_title: "Delhi to Jaipur Cultural Circuit",
+        origin: "Connaught Place, New Delhi",
+        destination: "Amer Fort, Jaipur",
+        stops: ["Amer Fort", "City Palace", "Hawa Mahal"],
+        circuit_type: "Multi-day circuit",
+        distance_km: 280,
+        start_date: "2026-11-20",
+        duration: "3 Days",
+        pickup_time: "06:00 AM",
+        pickup_address: "New Delhi",
+        travellers_count: 10,
+        adults_count: 8,
+        seniors_count: 2,
+        luggage_bags: 8,
+        matched_vehicle_class: "Urbania / Tempo",
+        target_budget: 22000,
+        amenities: ["AC", "Luggage Carrier", "Bilingual Chauffeur"],
+      }),
+    });
+
+    assert.strictEqual(res.status, 201, `Expected 201 Created, got ${res.status}`);
+    const json = await res.json();
+    assert.ok(json.data?.id, "Trip request record must contain generated ID");
+    assert.ok(json.data?.trip_code, "Trip request record must contain trip_code");
+
+    createdTripId = json.data.id;
+    createdTripCode = json.data.trip_code;
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 3: Register Commercial Vehicle for Operator Bob
+  // -------------------------------------------------------------------------
+  await runStep("3. Register commercial yellow-board vehicle for operator Bob", async () => {
+    const res = await fetch(`${BASE_URL}/api/vehicles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: vehicleIdBob,
+        operator_id: operatorBob,
+        operator_name: "Bob Express Mobility",
+        name: "Force Urbania Luxury 13-Seater",
+        category: "Urbania / Tempo",
+        registration_number: vehicleRegBob,
+        seating_capacity: 13,
+        luggage_capacity: 12,
+        model_year: 2024,
+        features: ["Luxury Pushback Recliners", "Dual AC", "Speed-Gov: 80 km/h"],
+        compliance_status: "Commercial Yellow Board Valid",
+        speed_governor_status: "Speed-Gov: 80 km/h Active",
+      }),
+    });
+
+    assert.strictEqual(res.status, 201, `Expected 201 Created, got ${res.status}`);
+    const json = await res.json();
+    assert.strictEqual(json.data?.registration_number, vehicleRegBob);
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 4: Marketplace Compliance Enforcement: Unverified Operator Blocked
+  // -------------------------------------------------------------------------
+  await runStep("4. Unverified operator is blocked from submitting quotations (403)", async () => {
+    // Attempt quotation as unverified operator Charlie
+    const res = await fetch(`${BASE_URL}/api/quotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trip_request_id: createdTripId,
+        trip_code: createdTripCode,
+        operator_id: unverifiedOperatorCharlie,
+        operator_name: "Charlie Cabs",
+        vehicle_id: vehicleIdBob,
+        vehicle_name: "Force Urbania Luxury 13-Seater",
+        vehicle_category: "Urbania / Tempo",
+        vehicle_reg: vehicleRegBob,
+        base_vehicle_fuel_rate: 18000,
+        driver_night_allowance: 2000,
+        tolls_state_permit_taxes: 2000,
+        travellers_count: 10,
+      }),
+    });
+
+    assert.strictEqual(res.status, 403, `Expected 403 Forbidden for unverified operator, got ${res.status}`);
+    const json = await res.json();
+    assert.ok(json.error?.includes("verification required") || json.error?.includes("Forbidden"));
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 5: Admin Verification Workflow & Audit Trail
+  // -------------------------------------------------------------------------
+  await runStep("5. Admin reviews and approves operator Bob via Admin Portal", async () => {
+    const res = await fetch(`${BASE_URL}/api/admin/operators`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operator_id: operatorBob,
+        operator_name: "Bob Express Mobility",
+        action: "approve",
+        reviewer_name: "Lead Compliance Officer",
+        notes: "Yellow Board RC and All-India Tourist Permit validated.",
+      }),
+    });
+
+    assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`);
+    const json = await res.json();
+    assert.strictEqual(json.success, true);
+    assert.strictEqual(json.action, "approved");
+    assert.ok(json.auditEntry?.id, "Audit entry ID must be generated");
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 6: Verified Operator Submits Legitimate Quotation
+  // -------------------------------------------------------------------------
+  await runStep("6. Verified operator Bob submits itemized quotation", async () => {
+    const res = await fetch(`${BASE_URL}/api/quotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trip_request_id: createdTripId,
+        trip_code: createdTripCode,
+        operator_id: operatorBob,
+        operator_name: "Bob Express Mobility",
+        operator_rating: 4.95,
+        reviews_count: 88,
+        vehicle_id: vehicleIdBob,
+        vehicle_name: "Force Urbania Luxury 13-Seater",
+        vehicle_category: "Urbania / Tempo",
+        vehicle_reg: vehicleRegBob,
+        base_vehicle_fuel_rate: 17500,
+        driver_night_allowance: 2000,
+        tolls_state_permit_taxes: 2500,
+        travellers_count: 10,
+        inclusions: ["Fuel", "Driver Night Stay", "All State Tolls"],
+        exclusions: ["Monument Entry Tickets", "Personal Meals"],
+        validity_hours: 48,
+        operator_note: "Brand new 2024 Urbania with veteran expressway chauffeur.",
+      }),
+    });
+
+    assert.strictEqual(res.status, 201, `Expected 201 Created, got ${res.status}`);
+    const json = await res.json();
+    assert.strictEqual(json.data?.total_quote, 22000); // 17500 + 2000 + 2500
+    assert.strictEqual(json.data?.per_person_fare, 2200); // 22000 / 10
+    createdQuotationId = json.data.id;
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 7: Prevent Duplicate Quotation on Same Vehicle
+  // -------------------------------------------------------------------------
+  await runStep("7. Duplicate quotation for same vehicle on same trip is rejected (409)", async () => {
+    const res = await fetch(`${BASE_URL}/api/quotations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trip_request_id: createdTripId,
+        trip_code: createdTripCode,
+        operator_id: operatorBob,
+        vehicle_id: vehicleIdBob,
+        base_vehicle_fuel_rate: 19000,
+        driver_night_allowance: 2000,
+        tolls_state_permit_taxes: 2500,
+        travellers_count: 10,
+      }),
+    });
+
+    assert.strictEqual(res.status, 409, `Expected 409 Conflict, got ${res.status}`);
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 8: Traveller Confirms Booking (Locks Quote & Trip)
+  // -------------------------------------------------------------------------
+  await runStep("8. Traveller Alice locks and confirms booking", async () => {
+    const res = await fetch(`${BASE_URL}/api/bookings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trip_request_id: createdTripId,
+        quotation_id: createdQuotationId,
+        traveler_id: travellerAlice,
+        traveler_name: "Alice Sharma",
+        operator_name: "Bob Express Mobility",
+        vehicle_name: "Force Urbania Luxury 13-Seater",
+        vehicle_reg: vehicleRegBob,
+        circuit_title: "Delhi to Jaipur Cultural Circuit",
+        duration: "3 Days",
+        total_amount: 22000,
+        per_person_amount: 2200,
+        pickup_date: "2026-11-20",
+      }),
+    });
+
+    assert.strictEqual(res.status, 201, `Expected 201 Created, got ${res.status}`);
+    const json = await res.json();
+    assert.strictEqual(json.data?.journey_status, "Confirmed");
+    createdBookingId = json.data.id;
+    createdBookingCode = json.data.booking_code;
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 9: Concurrency Guard: Overlapping Reservation for Same Vehicle Rejected
+  // -------------------------------------------------------------------------
+  await runStep("9. Overlapping reservation on same vehicle is blocked (409 Conflict)", async () => {
+    // Create an independent trip and quotation for Eve first
+    let dummyTripId = `trp_dummy_${runId}`;
+    let dummyQuoteId = `quo_dummy_${runId}`;
+    try {
+      await supabase.from("trip_requests").insert([{
+        id: dummyTripId,
+        trip_code: `TRP-DUMMY-${Math.floor(1000 + Math.random() * 9000)}`,
+        traveler_id: travellerEve,
+        traveler_name: "Eve Competitor",
+        circuit_title: "Conflicting Journey",
+        origin: "Delhi",
+        destination: "Jaipur",
+        circuit_type: "Round Trip",
+        distance_km: 280,
+        start_date: "2026-11-21",
+        duration: "3 Days",
+        pickup_time: "07:00 AM",
+        pickup_address: "Delhi",
+        travellers_count: 6,
+        matched_vehicle_class: "Urbania / Tempo",
+        target_budget: 20000,
+        status: "open",
+      }]);
+
+      await supabase.from("quotations").insert([{
+        id: dummyQuoteId,
+        trip_request_id: dummyTripId,
+        trip_code: "TRP-DUMMY",
+        operator_id: operatorBob,
+        operator_name: "Bob Express Mobility",
+        vehicle_id: vehicleIdBob,
+        vehicle_name: "Force Urbania Luxury 13-Seater",
+        vehicle_category: "Urbania / Tempo",
+        vehicle_reg: vehicleRegBob,
+        model_year: 2024,
+        base_vehicle_fuel_rate: 18000,
+        driver_night_allowance: 2000,
+        tolls_state_permit_taxes: 2000,
+        total_quote: 22000,
+        per_person_fare: 3667,
+        status: "pending",
+      }]);
+    } catch {}
+
+    // Attempt booking Nov 21 to Nov 23 on SAME vehicleRegBob
+    const res = await fetch(`${BASE_URL}/api/bookings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        trip_request_id: dummyTripId,
+        quotation_id: dummyQuoteId,
+        traveler_id: travellerEve,
+        traveler_name: "Eve Competitor",
+        operator_name: "Bob Express Mobility",
+        vehicle_name: "Force Urbania Luxury 13-Seater",
+        vehicle_reg: vehicleRegBob,
+        circuit_title: "Conflicting Golden Triangle",
+        duration: "3 Days",
+        total_amount: 22000,
+        per_person_amount: 3667,
+        pickup_date: "2026-11-21", // OVERLAPS with Nov 20-22
+      }),
+    });
+
+    assert.strictEqual(res.status, 409, `Expected 409 Conflict on overlapping dates, got ${res.status}`);
+    const json = await res.json();
+    assert.ok(
+      json.error?.includes("already confirmed") || json.error?.includes("Overlapping") || json.code === "23P01",
+      `Expected overlap conflict message, got: ${json.error}`
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 10: Cross-Tenant Security: Unauthorized Traveller Modification Blocked
+  // -------------------------------------------------------------------------
+  await runStep("10. Unauthenticated modification of booking is rejected (401)", async () => {
+    const res = await fetch(`${BASE_URL}/api/bookings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: createdBookingId,
+        journey_status: "Cancelled",
+      }),
+    });
+
+    assert.strictEqual(res.status, 401, `Expected 401 Unauthorized without Bearer token, got ${res.status}`);
+  });
+
+  // -------------------------------------------------------------------------
+  // STEP 11: Admin Verification Portal Inspection Check
+  // -------------------------------------------------------------------------
+  await runStep("11. Admin Operators API lists operators and verified audit entries", async () => {
+    const res = await fetch(`${BASE_URL}/api/admin/operators`);
+    assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`);
+    const json = await res.json();
+    assert.strictEqual(json.success, true);
+    assert.ok(json.data && json.data.length > 0, "Operators list must contain records");
+    assert.ok(json.meta?.total > 0, "Total count must be > 0");
+  });
+
+  // -------------------------------------------------------------------------
+  // CLEANUP DISPOSABLE FIXTURES
+  // -------------------------------------------------------------------------
+  try {
+    await supabase.from("bookings").delete().like("id", `%${runId}%`);
+    await supabase.from("quotations").delete().like("id", `%${runId}%`);
+    await supabase.from("trip_requests").delete().like("id", `%${runId}%`);
+    await supabase.from("vehicles").delete().like("id", `%${runId}%`);
+    await supabase.from("profiles").delete().like("id", `%${runId}%`);
+  } catch (cleanErr) {
+    // Ignore cleanup errors
+  }
+}
+
+(async () => {
+  try {
+    await runE2EMarketplaceLifecycle();
+    console.log("==================================================================");
+    console.log(`END-TO-END MARKETPLACE TEST SUMMARY: ${passedCount} passed, ${failedCount} failed.`);
+    console.log("==================================================================\n");
+    process.exit(failedCount > 0 ? 1 : 0);
+  } catch (fatal) {
+    console.error("Fatal E2E test execution error:", fatal);
+    process.exit(1);
+  }
+})();

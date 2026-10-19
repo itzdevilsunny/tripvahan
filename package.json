@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "lint": "next lint",
-    "test": "node --test scripts/test-marketplace.js"
+    "test": "node --test scripts/test-marketplace.js",
+    "test:staging": "node scripts/test-staging-integration.js",
+    "test:e2e": "node scripts/test-e2e-marketplace-lifecycle.js"
   },
   "engines": {
     "node": ">=20.0.0"
