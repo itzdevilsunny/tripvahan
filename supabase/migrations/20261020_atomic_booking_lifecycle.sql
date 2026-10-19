@@ -343,7 +343,7 @@ BEGIN
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Booking % not found'
+        RAISE EXCEPTION 'Booking % not found', p_booking_id
             USING ERRCODE = 'P0002';
     END IF;
 

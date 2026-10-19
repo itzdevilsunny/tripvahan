@@ -186,7 +186,7 @@ BEGIN
                 USING ERRCODE = '22023';
         END IF;
     ELSE
-        RAISE EXCEPTION 'Invalid verification action "%". Allowed values: approve, reject'
+        RAISE EXCEPTION 'Invalid verification action "%". Allowed values: approve, reject', p_action
             USING ERRCODE = '22023';
     END IF;
 

@@ -428,7 +428,7 @@ BEGIN
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Booking % not found' USING ERRCODE = 'P0002';
+        RAISE EXCEPTION 'Booking % not found', p_booking_id USING ERRCODE = 'P0002';
     END IF;
 
     IF v_booking.journey_status = 'Completed' THEN
@@ -626,7 +626,7 @@ BEGIN
                 USING ERRCODE = '22023';
         END IF;
     ELSE
-        RAISE EXCEPTION 'Invalid verification action "%". Allowed values: approve, reject'
+        RAISE EXCEPTION 'Invalid verification action "%". Allowed values: approve, reject', p_action
             USING ERRCODE = '22023';
     END IF;
 
@@ -918,7 +918,7 @@ BEGIN
     v_clean_notes := NULLIF(btrim(p_notes), '');
 
     IF v_status_norm NOT IN ('approved', 'rejected') THEN
-        RAISE EXCEPTION 'Invalid review status "%". Permitted values: approved, rejected' USING ERRCODE = '22023';
+        RAISE EXCEPTION 'Invalid review status "%". Permitted values: approved, rejected', p_status USING ERRCODE = '22023';
     END IF;
 
     IF v_status_norm = 'rejected' AND v_clean_reason IS NULL THEN
