@@ -45,11 +45,22 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
     IF COALESCE(auth.role(), '') != 'service_role' THEN
-        IF NEW.role IS DISTINCT FROM OLD.role THEN
-            RAISE EXCEPTION 'Forbidden: You cannot modify your own platform role' USING ERRCODE = '42501';
-        END IF;
-        IF NEW.verified IS DISTINCT FROM OLD.verified THEN
-            RAISE EXCEPTION 'Forbidden: You cannot modify your own verification status' USING ERRCODE = '42501';
+        -- Case 1: Caller modifying their own profile (self-privilege escalation strictly forbidden)
+        IF auth.uid()::text = NEW.id THEN
+            IF NEW.role IS DISTINCT FROM OLD.role THEN
+                RAISE EXCEPTION 'Forbidden: You cannot modify your own platform role' USING ERRCODE = '42501';
+            END IF;
+            IF NEW.verified IS DISTINCT FROM OLD.verified THEN
+                RAISE EXCEPTION 'Forbidden: You cannot modify your own verification status' USING ERRCODE = '42501';
+            END IF;
+        ELSE
+            -- Case 2: Modifying someone else's profile (requires platform administrator role)
+            IF NOT EXISTS (
+                SELECT 1 FROM public.profiles
+                WHERE id = auth.uid()::text AND role = 'admin'
+            ) THEN
+                RAISE EXCEPTION 'Forbidden: Administrator privileges required to modify user verification or role' USING ERRCODE = '42501';
+            END IF;
         END IF;
     END IF;
     RETURN NEW;
