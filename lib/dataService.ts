@@ -2,37 +2,6 @@ import { supabase } from "./supabase";
 import { Booking, Profile, Quotation, TripRequest, Vehicle } from "./types";
 
 class DataService {
-  private hasSupabaseTables: boolean | null = null;
-
-  async checkSupabaseConnection(): Promise<{ connected: boolean; hasTables: boolean; message: string }> {
-    try {
-      const { error } = await supabase.from("trip_requests").select("id").limit(1);
-      if (error) {
-        if (error.code === "PGRST205") {
-          this.hasSupabaseTables = false;
-          return {
-            connected: true,
-            hasTables: false,
-            message: "Connected to Supabase project. SQL Schema pending execution in Supabase SQL Editor.",
-          };
-        }
-        return {
-          connected: false,
-          hasTables: false,
-          message: error.message || "Failed to query Supabase",
-        };
-      }
-      this.hasSupabaseTables = true;
-      return {
-        connected: true,
-        hasTables: true,
-        message: "Live Supabase PostgreSQL connection active and synchronized!",
-      };
-    } catch (e: any) {
-      return { connected: false, hasTables: false, message: e.message };
-    }
-  }
-
   // --- TRIP REQUESTS ---
   async getTripRequests(travelerId?: string): Promise<TripRequest[]> {
     try {
