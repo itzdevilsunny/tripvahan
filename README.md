@@ -1,5 +1,7 @@
 # Tripvahan 🚗✨
 
+[![CI Pipeline](https://github.com/itzdevilsunny/tripvahan/actions/workflows/ci.yml/badge.svg)](https://github.com/itzdevilsunny/tripvahan/actions/workflows/ci.yml)
+
 > **India's Premier Commercial Outstation & Circuit Group Transport Marketplace**
 
 Tripvahan connects group travellers with verified commercial fleet operators for outstation journeys, pilgrimage circuits, and multi-day tours. Engineered with enterprise-grade security, zero-trust caller authentication, and PostgreSQL atomic transaction guarantees.
@@ -45,6 +47,7 @@ Tripvahan enforces rigorous security invariants across all API routes and databa
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - **Node.js:** `>= 20.0.0`
 - **npm:** `>= 10.0.0`
 - **Supabase Account** with PostgreSQL database instance
@@ -52,22 +55,27 @@ Tripvahan enforces rigorous security invariants across all API routes and databa
 ### Installation
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/itzdevilsunny/tripvahan.git
    cd tripvahan
    ```
 
 2. Install dependencies:
+
    ```bash
    npm install
    ```
 
 3. Set up environment variables:
    Copy `.env.example` to `.env.local`:
+
    ```bash
    cp .env.example .env.local
    ```
+
    Fill in your Supabase configuration:
+
    ```env
    NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-anon-key
@@ -75,9 +83,11 @@ Tripvahan enforces rigorous security invariants across all API routes and databa
    ```
 
 4. Run the development server:
+
    ```bash
    npm run dev
    ```
+
    Open [http://localhost:3000](http://localhost:3000) with your browser.
 
 ---
@@ -87,31 +97,41 @@ Tripvahan enforces rigorous security invariants across all API routes and databa
 Tripvahan includes comprehensive automated testing covering unit logic, database triggers, and end-to-end marketplace workflows:
 
 ### 1. Unit Test Suite (43 tests)
+
 Runs isolated business logic, capacity validation, state machine rules, and negative security barrier checks:
+
 ```bash
 npm test
 ```
 
 ### 2. TypeScript Validation
+
 Ensures strict type safety with zero compiler errors:
+
 ```bash
 npx tsc --noEmit
 ```
 
 ### 3. Production Build Validation
+
 Verifies bundle optimization and static generation:
+
 ```bash
 npm run build
 ```
 
 ### 4. Staging PostgreSQL Triggers & RLS (12 tests)
+
 Runs live against the staging Supabase database to verify trigger invariants, foreign key constraints, RLS policies, and stored procedure atomicity:
+
 ```bash
 npm run test:staging
 ```
 
 ### 5. End-to-End Marketplace Lifecycle (11 steps)
+
 Tests the complete multi-tenant lifecycle against a running local instance (Traveller trip creation → Operator registration & quotation → Admin verification → Booking confirmation → Concurrency guard → Cancellation):
+
 ```bash
 # Start server on port 3002
 npm run start -- -p 3002
@@ -124,7 +144,7 @@ npm run test:e2e
 
 ## 📂 Project Structure
 
-```
+```text
 tripvahan/
 ├── app/
 │   ├── api/
