@@ -119,7 +119,7 @@ async function runE2EMarketplaceLifecycle() {
   const operatorBob = `op_bob_${runId}`;
   const unverifiedOperatorCharlie = `op_charlie_${runId}`;
   const vehicleRegBob = `DL 01 E2E ${Math.floor(1000 + Math.random() * 9000)}`;
-  const vehicleIdBob = `veh_bob_${runId}`;
+  let vehicleIdBob = `veh_bob_${runId}`;
 
   let createdTripId = "";
   let createdTripCode = "";
@@ -132,6 +132,7 @@ async function runE2EMarketplaceLifecycle() {
   // -------------------------------------------------------------------------
   try {
     await supabase.from("profiles").upsert([
+      { id: "sys_admin", full_name: "Platform Administrator", email: "admin@tripvahan.internal", role: "admin", verified: true },
       { id: travellerAlice, full_name: "Alice Sharma", role: "traveller", verified: true },
       { id: travellerEve, full_name: "Eve Competitor", role: "traveller", verified: true },
       { id: operatorBob, full_name: "Bob Fleet Owner", operator_name: "Bob Express Mobility", role: "operator", verified: true },
@@ -216,6 +217,7 @@ async function runE2EMarketplaceLifecycle() {
     assert.strictEqual(res.status, 201, `Expected 201 Created, got ${res.status}`);
     const json = await res.json();
     assert.strictEqual(json.data?.registration_number, vehicleRegBob);
+    if (json.data?.id) vehicleIdBob = json.data.id;
   });
 
   // -------------------------------------------------------------------------
@@ -253,7 +255,10 @@ async function runE2EMarketplaceLifecycle() {
   await runStep("5. Admin reviews and approves operator Bob via Admin Portal", async () => {
     const res = await fetch(`${BASE_URL}/api/admin/operators`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+      },
       body: JSON.stringify({
         operator_id: operatorBob,
         operator_name: "Bob Express Mobility",
@@ -351,8 +356,8 @@ async function runE2EMarketplaceLifecycle() {
       }),
     });
 
-    assert.strictEqual(res.status, 201, `Expected 201 Created, got ${res.status}`);
     const json = await res.json();
+    assert.strictEqual(res.status, 201, `Expected 201 Created, got ${res.status}: ${JSON.stringify(json)}`);
     assert.strictEqual(json.data?.journey_status, "Confirmed");
     createdBookingId = json.data.id;
     createdBookingCode = json.data.booking_code;
@@ -454,7 +459,11 @@ async function runE2EMarketplaceLifecycle() {
   // STEP 11: Admin Verification Portal Inspection Check
   // -------------------------------------------------------------------------
   await runStep("11. Admin Operators API lists operators and verified audit entries", async () => {
-    const res = await fetch(`${BASE_URL}/api/admin/operators`);
+    const res = await fetch(`${BASE_URL}/api/admin/operators`, {
+      headers: {
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+      },
+    });
     assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`);
     const json = await res.json();
     assert.strictEqual(json.success, true);

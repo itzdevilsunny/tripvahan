@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { serverSupabase as supabase } from "@/lib/supabaseServer";
 
 export async function GET(req: Request) {
   try {
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
       // Continue if table query fails
     }
 
-    const vehicleId = `veh_${Date.now()}`;
+    const vehicleId = body.id || `veh_${Date.now()}`;
     const newVehicle = {
       id: vehicleId,
       operator_id,

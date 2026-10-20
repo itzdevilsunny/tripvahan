@@ -147,6 +147,15 @@ async function verifyAdminAuth(req: Request): Promise<{
     };
   }
 
+  // Support direct administrative invocation using privileged service role key
+  if (serviceKey && token === serviceKey) {
+    return {
+      authorized: true,
+      user: { id: "sys_admin", email: "admin@tripvahan.internal" },
+      profile: { id: "sys_admin", role: "admin", full_name: "Platform Administrator" },
+    };
+  }
+
   const {
     data: { user },
     error: authError,
