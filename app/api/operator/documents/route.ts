@@ -1,17 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { serverSupabase } from "@/lib/supabaseServer";
 import { OperatorDocument } from "@/lib/types";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://ykaorzsoajfwuzibmgoo.supabase.co";
-const serviceKey =
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.STAGING_SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  "";
-
-const serverSupabase = createClient(supabaseUrl, serviceKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
 // Allowed document types, MIME types, and maximum size
 const ALLOWED_DOC_TYPES = [
@@ -356,87 +345,43 @@ export async function PATCH(req: Request) {
       );
     }
 
-    // 1. ATOMIC TRANSACTION FIRST: Attempt PostgreSQL stored procedure public.review_operator_document_transaction(...)
-    try {
-      const { data: rpcData, error: rpcError } = await serverSupabase.rpc("review_operator_document_transaction", {
-        p_document_id: id,
-        p_status: status,
-        p_reason: status === "rejected" ? reason : null,
-        p_notes: notes || null,
-        p_caller_id: user.id,
-      });
+    // ATOMIC TRANSACTION: Execute PostgreSQL stored procedure public.review_operator_document_transaction(...)
+    const { data: rpcData, error: rpcError } = await serverSupabase.rpc("review_operator_document_transaction", {
+      p_document_id: id,
+      p_status: status,
+      p_reason: status === "rejected" ? reason : null,
+      p_notes: notes || null,
+      p_caller_id: user.id,
+    });
 
-      if (!rpcError && rpcData) {
-        return NextResponse.json({
-          success: true,
-          data: rpcData,
-          message: `Document ${status === "approved" ? "approved" : "rejected"} successfully`,
-          transaction_guaranteed: true,
-        });
+    if (rpcError) {
+      if (rpcError.code === "42501") {
+        return NextResponse.json({ error: rpcError.message }, { status: 403 });
       }
-
-      if (rpcError) {
-        if (rpcError.code === "42501") {
-          return NextResponse.json({ error: rpcError.message }, { status: 403 });
-        }
-        if (rpcError.code === "P0002") {
-          return NextResponse.json({ error: rpcError.message }, { status: 404 });
-        }
-        if (rpcError.code === "22023") {
-          return NextResponse.json({ error: rpcError.message }, { status: 400 });
-        }
+      if (rpcError.code === "P0002") {
+        return NextResponse.json({ error: rpcError.message }, { status: 404 });
       }
-    } catch {
-      // Fallback to table-level update
-    }
-
-    // 2. Table-level Fallback
-    const targetDoc = inMemoryDocuments.find((d) => d.id === id);
-    if (!targetDoc) {
-      return NextResponse.json({ error: `Document not found: ${id}` }, { status: 404 });
-    }
-
-    // Self-approval guard
-    if (targetDoc.operator_id === user.id) {
+      if (rpcError.code === "22023") {
+        return NextResponse.json({ error: rpcError.message }, { status: 400 });
+      }
       return NextResponse.json(
-        { error: "Forbidden: Administrators cannot review or approve their own documents" },
-        { status: 403 }
+        { error: `Document review transaction failed: ${rpcError.message}`, code: rpcError.code },
+        { status: 422 }
       );
     }
 
-    const reviewerName = profile?.full_name || user.email || "Platform Administrator";
-    const now = new Date().toISOString();
-
-    targetDoc.status = status;
-    targetDoc.reviewed_by = user.id;
-    targetDoc.reviewer_name = reviewerName;
-    targetDoc.reviewed_at = now;
-    targetDoc.rejection_reason = status === "rejected" ? reason : null;
-    targetDoc.reviewer_notes = notes || null;
-    targetDoc.updated_at = now;
-
-    // Also update in Supabase if table exists
-    try {
-      await serverSupabase
-        .from("operator_documents")
-        .update({
-          status,
-          reviewed_by: user.id,
-          reviewer_name: reviewerName,
-          reviewed_at: now,
-          rejection_reason: status === "rejected" ? reason : null,
-          reviewer_notes: notes || null,
-          updated_at: now,
-        })
-        .eq("id", id);
-    } catch {
-      // In-memory updated
+    if (!rpcData) {
+      return NextResponse.json(
+        { error: "Document review transaction returned no data" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({
       success: true,
-      data: targetDoc,
+      data: rpcData,
       message: `Document ${status === "approved" ? "approved" : "rejected"} successfully`,
+      transaction_guaranteed: true,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Failed to review document" }, { status: 500 });

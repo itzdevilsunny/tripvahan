@@ -25,6 +25,42 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Unauthorized: Valid authentication token required to register or modify vehicles" },
+        { status: 401 }
+      );
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized: Invalid or expired authentication session" },
+        { status: 401 }
+      );
+    }
+
+    // Verify caller role and operator profile
+    const { data: operatorProfile, error: profErr } = await supabase
+      .from("profiles")
+      .select("id, role, operator_name, verified")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profErr || !operatorProfile || operatorProfile.role !== "operator") {
+      return NextResponse.json(
+        { error: "Forbidden: Operator profile required to register vehicles" },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const {
       operator_id,
@@ -41,9 +77,17 @@ export async function POST(req: Request) {
       image_url,
     } = body;
 
-    if (!operator_id || !name || !registration_number) {
+    // Reject cross-operator impersonation
+    if (operator_id && operator_id !== user.id) {
       return NextResponse.json(
-        { error: "Operator ID, vehicle name, and registration number are required" },
+        { error: "Forbidden: You cannot register vehicles for another operator" },
+        { status: 403 }
+      );
+    }
+
+    if (!name || !registration_number) {
+      return NextResponse.json(
+        { error: "Vehicle name and registration number are required" },
         { status: 400 }
       );
     }
@@ -56,31 +100,15 @@ export async function POST(req: Request) {
       );
     }
 
-    let isOperatorVerified = false;
-    // Verify operator profile exists and verification status
-    try {
-      const { data: operatorProfile } = await supabase
-        .from("profiles")
-        .select("id, role, operator_name, verified")
-        .eq("id", operator_id)
-        .maybeSingle();
-
-      if (!operatorProfile) {
-        return NextResponse.json(
-          { error: "Operator profile not found. Please complete operator registration first." },
-          { status: 404 }
-        );
-      }
-      isOperatorVerified = operatorProfile.verified === true;
-    } catch {
-      // Continue if table query fails
-    }
+    const isOperatorVerified = operatorProfile.verified === true;
+    const authoritativeOperatorId = user.id;
+    const authoritativeOperatorName = operatorProfile.operator_name || operator_name || "Commercial Fleet Partner";
 
     const vehicleId = body.id || `veh_${Date.now()}`;
     const newVehicle = {
       id: vehicleId,
-      operator_id,
-      operator_name: operator_name || "Commercial Fleet Partner",
+      operator_id: authoritativeOperatorId,
+      operator_name: authoritativeOperatorName,
       name,
       category: category || "Urbania / Tempo",
       registration_number: registration_number.toUpperCase().trim(),

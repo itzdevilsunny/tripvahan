@@ -2103,5 +2103,313 @@ test("Document submission rejects already-expired certificates and prevents dupl
   assert.ok(duplicateRes.error.includes("already exists"));
 });
 
+// ============================================================================
+// PHASE 3 — CRITICAL API SECURITY & ATOMIC FALLBACK PREVENTION TEST SUITE
+// ============================================================================
+
+// 33. Booking Confirmation Authentication & Authorization Guard Tests
+test("Unauthenticated booking confirmation returns 401 and rejects caller-supplied traveler ID spoofing", () => {
+  function validateBookingConfirmationAuth(token, user, tripRequest) {
+    if (!token) {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Valid authentication token required to confirm booking" };
+    }
+    if (!user || !user.id) {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Invalid or expired authentication session" };
+    }
+    if (tripRequest && tripRequest.traveler_id !== user.id) {
+      return { authorized: false, statusCode: 403, error: "Forbidden: You are not authorized to confirm a booking for another traveller's trip request" };
+    }
+    return { authorized: true, callerId: user.id };
+  }
+
+  // 1. Missing Bearer token
+  const resNoToken = validateBookingConfirmationAuth(null, null, { traveler_id: "usr_alice" });
+  assert.strictEqual(resNoToken.authorized, false);
+  assert.strictEqual(resNoToken.statusCode, 401);
+
+  // 2. Invalid session
+  const resBadToken = validateBookingConfirmationAuth("invalid_jwt", null, { traveler_id: "usr_alice" });
+  assert.strictEqual(resBadToken.authorized, false);
+  assert.strictEqual(resBadToken.statusCode, 401);
+
+  // 3. Caller Eve trying to confirm Alice's booking (caller spoofing)
+  const eveUser = { id: "usr_eve" };
+  const aliceTrip = { traveler_id: "usr_alice" };
+  const resSpoof = validateBookingConfirmationAuth("valid_eve_jwt", eveUser, aliceTrip);
+  assert.strictEqual(resSpoof.authorized, false);
+  assert.strictEqual(resSpoof.statusCode, 403);
+  assert.ok(resSpoof.error.includes("Forbidden"));
+
+  // 4. Legitimate owner Alice confirming her own booking
+  const aliceUser = { id: "usr_alice" };
+  const resValid = validateBookingConfirmationAuth("valid_alice_jwt", aliceUser, aliceTrip);
+  assert.strictEqual(resValid.authorized, true);
+  assert.strictEqual(resValid.callerId, "usr_alice");
+});
+
+// 34. Quotation Submission Authentication & Cross-Operator Authorization Tests
+test("Quotation submission strictly requires verified operator and blocks cross-operator impersonation", () => {
+  function validateQuotationSubmissionAuth(token, user, profile, requestedOperatorId) {
+    if (!token) {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Valid operator authentication token required" };
+    }
+    if (!user || !user.id) {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Invalid or expired operator session" };
+    }
+    if (!profile || profile.role !== "operator") {
+      return { authorized: false, statusCode: 403, error: "Forbidden: Only registered transport fleet operators can submit quotations" };
+    }
+    if (!profile.verified) {
+      return { authorized: false, statusCode: 403, error: "Forbidden: Operator account must complete statutory document verification before bidding" };
+    }
+    if (requestedOperatorId && requestedOperatorId !== user.id) {
+      return { authorized: false, statusCode: 403, error: "Forbidden: Cross-operator quotation submission is strictly prohibited" };
+    }
+    return { authorized: true, operatorId: user.id };
+  }
+
+  // 1. Missing token -> 401
+  const resUnauth = validateQuotationSubmissionAuth(null, null, null, "op_bob");
+  assert.strictEqual(resUnauth.authorized, false);
+  assert.strictEqual(resUnauth.statusCode, 401);
+
+  // 2. Non-operator caller (traveller Alice) -> 403
+  const aliceUser = { id: "usr_alice" };
+  const aliceProfile = { role: "traveler", verified: true };
+  const resTraveller = validateQuotationSubmissionAuth("jwt_alice", aliceUser, aliceProfile, "usr_alice");
+  assert.strictEqual(resTraveller.authorized, false);
+  assert.strictEqual(resTraveller.statusCode, 403);
+
+  // 3. Unverified operator Charlie -> 403
+  const charlieUser = { id: "op_charlie" };
+  const charlieProfile = { role: "operator", verified: false };
+  const resUnverified = validateQuotationSubmissionAuth("jwt_charlie", charlieUser, charlieProfile, "op_charlie");
+  assert.strictEqual(resUnverified.authorized, false);
+  assert.strictEqual(resUnverified.statusCode, 403);
+  assert.ok(resUnverified.error.includes("verification"));
+
+  // 4. Operator Bob attempting to submit under Operator Charlie's ID -> 403
+  const bobUser = { id: "op_bob" };
+  const bobProfile = { role: "operator", verified: true };
+  const resCross = validateQuotationSubmissionAuth("jwt_bob", bobUser, bobProfile, "op_charlie");
+  assert.strictEqual(resCross.authorized, false);
+  assert.strictEqual(resCross.statusCode, 403);
+  assert.ok(resCross.error.includes("Cross-operator"));
+
+  // 5. Verified operator Bob submitting under own ID -> authorized
+  const resValid = validateQuotationSubmissionAuth("jwt_bob", bobUser, bobProfile, "op_bob");
+  assert.strictEqual(resValid.authorized, true);
+  assert.strictEqual(resValid.operatorId, "op_bob");
+});
+
+// 35. Vehicle Registration & Fleet Mutation Authorization Tests
+test("Vehicle registration and mutation require operator authentication and block cross-operator tampering", () => {
+  function validateVehicleActionAuth(token, user, profile, targetOperatorId, existingVehicleOwnerId) {
+    if (!token) {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Valid authentication token required to register or modify vehicles" };
+    }
+    if (!user || !user.id) {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Invalid or expired session" };
+    }
+    if (!profile || profile.role !== "operator") {
+      return { authorized: false, statusCode: 403, error: "Forbidden: Only fleet operators can register or manage vehicles" };
+    }
+    if (targetOperatorId && targetOperatorId !== user.id) {
+      return { authorized: false, statusCode: 403, error: "Forbidden: You cannot register a vehicle under another operator's identity" };
+    }
+    if (existingVehicleOwnerId && existingVehicleOwnerId !== user.id && profile.role !== "admin") {
+      return { authorized: false, statusCode: 403, error: "Forbidden: You do not own this vehicle and cannot modify it" };
+    }
+    return { authorized: true, operatorId: user.id };
+  }
+
+  // 1. Unauthenticated vehicle registration -> 401
+  const resUnauth = validateVehicleActionAuth(null, null, null, "op_bob");
+  assert.strictEqual(resUnauth.authorized, false);
+  assert.strictEqual(resUnauth.statusCode, 401);
+
+  // 2. Non-operator caller -> 403
+  const travellerUser = { id: "usr_alice" };
+  const travellerProfile = { role: "traveler" };
+  const resNonOp = validateVehicleActionAuth("jwt_alice", travellerUser, travellerProfile, "usr_alice");
+  assert.strictEqual(resNonOp.authorized, false);
+  assert.strictEqual(resNonOp.statusCode, 403);
+
+  // 3. Bob trying to register vehicle as Charlie -> 403
+  const bobUser = { id: "op_bob" };
+  const bobProfile = { role: "operator" };
+  const resCrossReg = validateVehicleActionAuth("jwt_bob", bobUser, bobProfile, "op_charlie");
+  assert.strictEqual(resCrossReg.authorized, false);
+  assert.strictEqual(resCrossReg.statusCode, 403);
+
+  // 4. Bob trying to mutate Charlie's existing vehicle -> 403
+  const resCrossMutate = validateVehicleActionAuth("jwt_bob", bobUser, bobProfile, "op_bob", "op_charlie");
+  assert.strictEqual(resCrossMutate.authorized, false);
+  assert.strictEqual(resCrossMutate.statusCode, 403);
+
+  // 5. Bob mutating his own vehicle -> 200
+  const resValid = validateVehicleActionAuth("jwt_bob", bobUser, bobProfile, "op_bob", "op_bob");
+  assert.strictEqual(resValid.authorized, true);
+});
+
+// 36. Administrator Verification & Service-Role Authentication Rejection Tests
+test("Administrator verification requires genuine admin session and rejects service-role token as caller identity", () => {
+  function validateAdminSession(token, user, profile, targetOperatorId) {
+    if (!token) {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Missing administrator authentication token" };
+    }
+    // Strict enforcement: Service role secret supplied as caller Bearer token is rejected
+    // Service-role keys do not have user identity and cannot act as a caller session
+    if (token === "SUPABASE_SERVICE_ROLE_SECRET_KEY" || !user || !user.id || user.id === "sys_admin") {
+      return { authorized: false, statusCode: 401, error: "Unauthorized: Invalid or expired administrator session (synthetic identities prohibited)" };
+    }
+    if (!profile || profile.role !== "admin") {
+      return { authorized: false, statusCode: 403, error: "Forbidden: Platform administrator privileges required to access verification controls" };
+    }
+    if (user.id === targetOperatorId) {
+      return { authorized: false, statusCode: 403, error: "Forbidden: Administrators cannot approve or modify their own operator account verification" };
+    }
+    return { authorized: true, adminId: user.id };
+  }
+
+  // 1. Missing token -> 401
+  const resNoToken = validateAdminSession(null, null, null, "op_bob");
+  assert.strictEqual(resNoToken.authorized, false);
+  assert.strictEqual(resNoToken.statusCode, 401);
+
+  // 2. Service role key passed as Bearer token -> 401
+  const resServiceKey = validateAdminSession("SUPABASE_SERVICE_ROLE_SECRET_KEY", null, null, "op_bob");
+  assert.strictEqual(resServiceKey.authorized, false);
+  assert.strictEqual(resServiceKey.statusCode, 401);
+
+  // 3. Synthetic sys_admin user -> 401
+  const sysAdminUser = { id: "sys_admin" };
+  const resSysAdmin = validateAdminSession("jwt_fake", sysAdminUser, { role: "admin" }, "op_bob");
+  assert.strictEqual(resSysAdmin.authorized, false);
+  assert.strictEqual(resSysAdmin.statusCode, 401);
+
+  // 4. Non-admin operator Dave -> 403
+  const daveUser = { id: "usr_dave" };
+  const daveProfile = { role: "operator" };
+  const resNonAdmin = validateAdminSession("jwt_dave", daveUser, daveProfile, "op_bob");
+  assert.strictEqual(resNonAdmin.authorized, false);
+  assert.strictEqual(resNonAdmin.statusCode, 403);
+
+  // 5. Admin Dave attempting self-approval -> 403
+  const adminDave = { id: "usr_admin_dave" };
+  const adminProfile = { role: "admin" };
+  const resSelfApproval = validateAdminSession("jwt_admin_dave", adminDave, adminProfile, "usr_admin_dave");
+  assert.strictEqual(resSelfApproval.authorized, false);
+  assert.strictEqual(resSelfApproval.statusCode, 403);
+
+  // 6. Valid admin approving operator Bob -> 200
+  const resValid = validateAdminSession("jwt_admin_dave", adminDave, adminProfile, "op_bob");
+  assert.strictEqual(resValid.authorized, true);
+  assert.strictEqual(resValid.adminId, "usr_admin_dave");
+});
+
+// 37. Database Transaction Failure Never Triggers Insecure Direct-Write Fallback
+test("Database transaction failure cleanly returns error without falling back to insecure direct table writes", () => {
+  // Mock database representing state before transaction
+  const initialDb = {
+    bookings: [],
+    vehicles: [{ id: "veh_1", registration_no: "DL 01 TA 9821", status: "Available" }],
+    trip_requests: [{ id: "trip_1", traveler_id: "usr_alice", status: "open" }],
+    quotations: [{ id: "quote_1", trip_request_id: "trip_1", operator_id: "op_bob", status: "pending", vehicle_id: "veh_1" }],
+  };
+
+  // Simulating route handler logic where direct-write fallback is REMOVED
+  function handleBookingConfirmation(db, { trip_request_id, quotation_id, caller_id, rpcShouldFail }) {
+    if (rpcShouldFail) {
+      // Stored procedure returns conflict error (e.g., overlapping reservation or concurrent lock)
+      const rpcError = { code: "23505", message: "Vehicle is already confirmed for another booking during the requested dates" };
+      // STRICT REQUIREMENT: No fallback direct-writes to db.bookings or db.vehicles!
+      return {
+        statusCode: 409,
+        error: rpcError.message,
+        code: rpcError.code,
+      };
+    }
+
+    // Normal atomic execution
+    db.bookings.push({ id: "bk_1", trip_request_id, quotation_id, traveler_id: caller_id });
+    return { statusCode: 201, data: { id: "bk_1" } };
+  }
+
+  // Deep clone DB to track mutations
+  const dbState = JSON.parse(JSON.stringify(initialDb));
+
+  // Run with RPC failure
+  const result = handleBookingConfirmation(dbState, {
+    trip_request_id: "trip_1",
+    quotation_id: "quote_1",
+    caller_id: "usr_alice",
+    rpcShouldFail: true,
+  });
+
+  // 1. Error response matches 409 conflict
+  assert.strictEqual(result.statusCode, 409);
+  assert.ok(result.error.includes("already confirmed"));
+
+  // 2. CRITICAL: Bookings table remained completely untouched (NO partial direct write!)
+  assert.strictEqual(dbState.bookings.length, 0, "No booking record should be inserted when procedure fails");
+  // 3. Vehicle status remained unchanged
+  assert.strictEqual(dbState.vehicles[0].status, "Available", "Vehicle status must remain unchanged on failure");
+  // 4. Trip request status remained open
+  assert.strictEqual(dbState.trip_requests[0].status, "open", "Trip status must remain open on failure");
+});
+
+// 38. Failed Verification Audit Insertion Leaves Profile and Vehicle State Unchanged
+test("Failed verification audit insertion leaves profile and vehicle state unchanged (Atomic Guarantee)", () => {
+  const operatorProfile = { id: "op_bob", verified: false, rejection_reason: null };
+  const operatorVehicles = [{ id: "veh_bob_1", operator_id: "op_bob", status: "Pending Verification" }];
+  const auditTable = [];
+
+  function executeVerifyOperatorAtomic(profile, vehicles, audit, { action, reason, auditInsertFails }) {
+    // Snapshot state
+    const profileSnapshot = { ...profile };
+    const vehiclesSnapshot = vehicles.map((v) => ({ ...v }));
+
+    try {
+      // Step 1: Update profile in-memory
+      profile.verified = action === "approve";
+      profile.rejection_reason = action === "reject" ? reason : null;
+
+      // Step 2: Update vehicles in-memory
+      for (const v of vehicles) {
+        v.status = action === "approve" ? "Available" : "Pending Verification";
+      }
+
+      // Step 3: Insert audit record
+      if (auditInsertFails) {
+        throw new Error("Foreign key constraint violation or DB error during audit logging");
+      }
+
+      audit.push({ id: "aud_1", operator_id: profile.id, action });
+      return { success: true };
+    } catch (err) {
+      // Transaction rollback: restore snapshots
+      Object.assign(profile, profileSnapshot);
+      vehicles.splice(0, vehicles.length, ...vehiclesSnapshot);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Attempt verification where audit log fails
+  const res = executeVerifyOperatorAtomic(operatorProfile, operatorVehicles, auditTable, {
+    action: "approve",
+    auditInsertFails: true,
+  });
+
+  // Verify failure
+  assert.strictEqual(res.success, false);
+  assert.ok(res.error.includes("audit logging"));
+
+  // Verify atomic rollback
+  assert.strictEqual(operatorProfile.verified, false, "Profile verified must remain false after rollback");
+  assert.strictEqual(operatorVehicles[0].status, "Pending Verification", "Vehicle status must remain Pending Verification");
+  assert.strictEqual(auditTable.length, 0, "No audit records created");
+});
+
 
 

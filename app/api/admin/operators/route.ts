@@ -1,18 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { serverSupabase } from "@/lib/supabaseServer";
 import { ComplianceDocument, OperatorVerificationDetail, VerificationAuditEntry } from "@/lib/types";
-
-// Server-side Supabase client with elevated administrative permissions when service key exists
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://ykaorzsoajfwuzibmgoo.supabase.co";
-const serviceKey =
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.STAGING_SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  "";
-
-const serverSupabase = createClient(supabaseUrl, serviceKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
 // In-memory verification audit log persistence for session & audit trail
 const inMemoryAuditLogs: VerificationAuditEntry[] = [
@@ -144,15 +132,6 @@ async function verifyAdminAuth(req: Request): Promise<{
       authorized: false,
       statusCode: 401,
       error: "Unauthorized: Missing administrator authentication token",
-    };
-  }
-
-  // Support direct administrative invocation using privileged service role key
-  if (serviceKey && token === serviceKey) {
-    return {
-      authorized: true,
-      user: { id: "sys_admin", email: "admin@tripvahan.internal" },
-      profile: { id: "sys_admin", role: "admin", full_name: "Platform Administrator" },
     };
   }
 
@@ -418,252 +397,62 @@ export async function POST(req: Request) {
     const now = new Date().toISOString();
     const correlationId = req.headers.get("x-request-id") || req.headers.get("x-correlation-id") || `req_${Date.now()}`;
 
-    // ATOMIC TRANSACTION FIRST: Attempt PostgreSQL stored procedure public.verify_operator_transaction(...)
-    try {
-      const { data: rpcData, error: rpcError } = await serverSupabase.rpc("verify_operator_transaction", {
-        p_operator_id: operator_id,
-        p_action: action,
-        p_reason: action === "reject" ? reason : null,
-        p_notes: notes || null,
-        p_caller_id: user.id,
-        p_correlation_id: correlationId,
-      });
+    // ATOMIC TRANSACTION: Execute PostgreSQL stored procedure public.verify_operator_transaction(...)
+    const { data: rpcData, error: rpcError } = await serverSupabase.rpc("verify_operator_transaction", {
+      p_operator_id: operator_id,
+      p_action: action,
+      p_reason: action === "reject" ? reason : null,
+      p_notes: notes || null,
+      p_caller_id: user.id,
+      p_correlation_id: correlationId,
+    });
 
-      if (!rpcError && rpcData) {
-        const auditEntry: VerificationAuditEntry = rpcData.audit_entry || {
-          id: `aud_${Date.now()}`,
-          operator_id,
-          operator_name: body.operator_name || "Operator",
-          action: rpcData.action,
-          decided_by: reviewerName,
-          decided_at: now,
-          reason,
-          notes,
-        };
-        inMemoryAuditLogs.unshift(auditEntry);
-
-        return NextResponse.json({
-          success: true,
-          action: rpcData.action,
-          operator_id,
-          message: action === "approve"
-            ? "Operator successfully verified and authorized to bid on marketplace requests."
-            : `Operator application rejected: ${reason}`,
-          auditEntry,
-          transaction_guaranteed: true,
-        });
+    if (rpcError) {
+      if (rpcError.code === "42501") {
+        return NextResponse.json({ error: rpcError.message }, { status: 403 });
       }
-
-      if (rpcError) {
-        if (rpcError.code === "42501") {
-          return NextResponse.json({ error: rpcError.message }, { status: 403 });
-        }
-        if (rpcError.code === "P0002") {
-          return NextResponse.json({ error: rpcError.message }, { status: 404 });
-        }
-        if (rpcError.code === "22023") {
-          return NextResponse.json({ error: rpcError.message }, { status: 400 });
-        }
-        // Fallback to table-level operations if procedure is not yet created
+      if (rpcError.code === "P0002") {
+        return NextResponse.json({ error: rpcError.message }, { status: 404 });
       }
-    } catch {
-      // Fallback to table-level operations
-    }
-
-    // TABLE-LEVEL FALLBACK WITH ATOMIC ROLLBACK ON AUDIT INSERTION FAILURE
-    // 1. Fetch current operator profile to verify existence and capture previous state
-    const { data: existingOperator, error: opFetchErr } = await serverSupabase
-      .from("profiles")
-      .select("id, role, full_name, operator_name, verified, rejection_reason")
-      .eq("id", operator_id)
-      .maybeSingle();
-
-    if (opFetchErr || !existingOperator) {
+      if (rpcError.code === "22023") {
+        return NextResponse.json({ error: rpcError.message }, { status: 400 });
+      }
       return NextResponse.json(
-        { error: `Operator profile not found: ${operator_id}` },
-        { status: 404 }
+        { error: `Operator verification failed: ${rpcError.message}`, code: rpcError.code },
+        { status: 422 }
       );
     }
 
-    const previousState = Boolean(existingOperator.verified);
-    const newState = action === "approve";
-    const auditId = `aud_${Date.now()}`;
-    const opDisplayName = existingOperator.operator_name || existingOperator.full_name || body.operator_name || "Operator";
-
-    if (action === "approve") {
-      // 1. Update Profile in Supabase
-      const { error: profUpErr } = await serverSupabase
-        .from("profiles")
-        .update({
-          verified: true,
-          rejection_reason: null,
-          decided_at: now,
-          decided_by: reviewerName,
-        })
-        .eq("id", operator_id);
-
-      if (profUpErr) {
-        return NextResponse.json(
-          { error: `Database update failed: ${profUpErr.message}` },
-          { status: 422 }
-        );
-      }
-
-      // 2. Update Vehicles compliance status
-      await serverSupabase
-        .from("vehicles")
-        .update({
-          compliance_status: "Verified Commercial Fleet",
-          status: "Available",
-        })
-        .eq("operator_id", operator_id);
-
-      // 3. Insert into persistent operator_verification_audit table
-      const auditRecord = {
-        id: auditId,
-        operator_id,
-        operator_name: opDisplayName,
-        admin_id: user.id,
-        admin_name: reviewerName,
-        admin_email: user.email,
-        action: "approved",
-        previous_state: previousState,
-        new_state: newState,
-        decision_reason: null,
-        notes: notes || "Commercial compliance verified. Authorized for passenger circuit bidding.",
-        correlation_id: correlationId,
-        created_at: now,
-      };
-
-      const { error: auditErr } = await serverSupabase
-        .from("operator_verification_audit")
-        .insert([auditRecord]);
-
-      if (auditErr && auditErr.code !== "42P01" && !auditErr.message?.includes("does not exist")) {
-        // Rollback profile update to ensure atomicity
-        await serverSupabase
-          .from("profiles")
-          .update({
-            verified: previousState,
-            rejection_reason: existingOperator.rejection_reason || null,
-          })
-          .eq("id", operator_id);
-
-        return NextResponse.json(
-          { error: `Failed to persist audit trail: ${auditErr.message}. Operation rolled back.` },
-          { status: 500 }
-        );
-      }
-
-      // 4. Also sync in-memory audit logs
-      const auditEntry: VerificationAuditEntry = {
-        id: auditId,
-        operator_id,
-        operator_name: opDisplayName,
-        action: "approved",
-        decided_by: reviewerName,
-        decided_at: now,
-        notes: notes || "Commercial compliance verified. Authorized for passenger circuit bidding.",
-      };
-      inMemoryAuditLogs.unshift(auditEntry);
-
-      return NextResponse.json({
-        success: true,
-        action: "approved",
-        operator_id,
-        message: "Operator successfully verified and authorized to bid on marketplace requests.",
-        auditEntry,
-      });
+    if (!rpcData) {
+      return NextResponse.json(
+        { error: "Operator verification transaction returned no data" },
+        { status: 500 }
+      );
     }
 
-    if (action === "reject") {
-      // 1. Update Profile in Supabase
-      const { error: profUpErr } = await serverSupabase
-        .from("profiles")
-        .update({
-          verified: false,
-          rejection_reason: reason,
-          decided_at: now,
-          decided_by: reviewerName,
-        })
-        .eq("id", operator_id);
+    const auditEntry: VerificationAuditEntry = rpcData.audit_entry || {
+      id: `aud_${Date.now()}`,
+      operator_id,
+      operator_name: body.operator_name || "Operator",
+      action: rpcData.action || (action === "approve" ? "approved" : "rejected"),
+      decided_by: reviewerName,
+      decided_at: now,
+      reason,
+      notes,
+    };
+    inMemoryAuditLogs.unshift(auditEntry);
 
-      if (profUpErr) {
-        return NextResponse.json(
-          { error: `Database update failed: ${profUpErr.message}` },
-          { status: 422 }
-        );
-      }
-
-      // 2. Restrict vehicles
-      await serverSupabase
-        .from("vehicles")
-        .update({
-          compliance_status: `Compliance Rejected: ${reason}`,
-          status: "Pending Verification",
-        })
-        .eq("operator_id", operator_id);
-
-      // 3. Insert into persistent operator_verification_audit table
-      const auditRecord = {
-        id: auditId,
-        operator_id,
-        operator_name: opDisplayName,
-        admin_id: user.id,
-        admin_name: reviewerName,
-        admin_email: user.email,
-        action: "rejected",
-        previous_state: previousState,
-        new_state: newState,
-        decision_reason: reason,
-        notes: notes || "Operator application declined due to documentation non-compliance.",
-        correlation_id: correlationId,
-        created_at: now,
-      };
-
-      const { error: auditErr } = await serverSupabase
-        .from("operator_verification_audit")
-        .insert([auditRecord]);
-
-      if (auditErr && auditErr.code !== "42P01" && !auditErr.message?.includes("does not exist")) {
-        // Rollback profile update to ensure atomicity
-        await serverSupabase
-          .from("profiles")
-          .update({
-            verified: previousState,
-            rejection_reason: existingOperator.rejection_reason || null,
-          })
-          .eq("id", operator_id);
-
-        return NextResponse.json(
-          { error: `Failed to persist audit trail: ${auditErr.message}. Operation rolled back.` },
-          { status: 500 }
-        );
-      }
-
-      // 4. Also sync in-memory audit logs
-      const auditEntry: VerificationAuditEntry = {
-        id: auditId,
-        operator_id,
-        operator_name: opDisplayName,
-        action: "rejected",
-        decided_by: reviewerName,
-        decided_at: now,
-        reason,
-        notes: notes || "Operator application declined due to documentation non-compliance.",
-      };
-      inMemoryAuditLogs.unshift(auditEntry);
-
-      return NextResponse.json({
-        success: true,
-        action: "rejected",
-        operator_id,
-        message: `Operator application rejected: ${reason}`,
-        auditEntry,
-      });
-    }
-
-    return NextResponse.json({ error: "Invalid operation" }, { status: 400 });
+    return NextResponse.json({
+      success: true,
+      action: rpcData.action || (action === "approve" ? "approved" : "rejected"),
+      operator_id,
+      message:
+        action === "approve"
+          ? "Operator successfully verified and authorized to bid on marketplace requests."
+          : `Operator application rejected: ${reason}`,
+      auditEntry,
+      transaction_guaranteed: true,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Failed to process operator verification action" }, { status: 500 });
   }

@@ -29,6 +29,42 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Unauthorized: Valid authentication token required to submit quotations" },
+        { status: 401 }
+      );
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized: Invalid or expired authentication session" },
+        { status: 401 }
+      );
+    }
+
+    // Verify caller role and operator profile
+    const { data: operatorProfile, error: profErr } = await supabase
+      .from("profiles")
+      .select("id, role, operator_name, verified")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profErr || !operatorProfile || operatorProfile.role !== "operator") {
+      return NextResponse.json(
+        { error: "Forbidden: Verified operator profile required to submit quotations" },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const {
       trip_request_id,
@@ -54,12 +90,33 @@ export async function POST(req: Request) {
       operator_note = "",
     } = body;
 
-    if (!trip_request_id || !operator_id || !vehicle_id) {
+    if (!trip_request_id || !vehicle_id) {
       return NextResponse.json(
-        { error: "trip_request_id, operator_id, and vehicle_id are required" },
+        { error: "trip_request_id and vehicle_id are required" },
         { status: 400 }
       );
     }
+
+    // Prohibit cross-operator impersonation
+    if (operator_id && operator_id !== user.id) {
+      return NextResponse.json(
+        { error: "Forbidden: You cannot submit quotations on behalf of another operator" },
+        { status: 403 }
+      );
+    }
+
+    // Verify operator compliance verification
+    if (operatorProfile.verified !== true) {
+      return NextResponse.json(
+        {
+          error: "Forbidden: Commercial compliance verification required. Unverified fleet partners cannot submit quotations to passenger circuits until approved by platform administrators.",
+        },
+        { status: 403 }
+      );
+    }
+
+    const authoritativeOperatorId = user.id;
+    const authoritativeOperatorName = operatorProfile.operator_name || operator_name || "Commercial Fleet Partner";
 
     // Server-side strict numeric calculation (avoiding floating point errors)
     const baseRate = Math.round(Number(base_vehicle_fuel_rate) || 0);
@@ -88,7 +145,7 @@ export async function POST(req: Request) {
 
       if (vehicleRecord) {
         // 1. Authorization & Ownership Check
-        if (vehicleRecord.operator_id !== operator_id) {
+        if (vehicleRecord.operator_id !== authoritativeOperatorId) {
           return NextResponse.json(
             { error: "Forbidden: You are not authorized to quote using another operator's vehicle" },
             { status: 403 }
@@ -128,30 +185,6 @@ export async function POST(req: Request) {
       // In case tables are not yet loaded
     }
 
-    let isOperatorVerified = false;
-    try {
-      const { data: operatorProfile } = await supabase
-        .from("profiles")
-        .select("verified")
-        .eq("id", operator_id)
-        .maybeSingle();
-
-      if (operatorProfile && operatorProfile.verified === true) {
-        isOperatorVerified = true;
-      }
-    } catch {
-      // Continue if table not yet created
-    }
-
-    if (!isOperatorVerified) {
-      return NextResponse.json(
-        {
-          error: "Forbidden: Commercial compliance verification required. Unverified fleet partners cannot submit quotations to passenger circuits until approved by platform administrators.",
-        },
-        { status: 403 }
-      );
-    }
-
     const assignedBadge = badge || "Tier-1 Verified Partner";
 
     const quoteId = `quo_${Date.now()}`;
@@ -159,8 +192,8 @@ export async function POST(req: Request) {
       id: quoteId,
       trip_request_id,
       trip_code: trip_code || "TRP",
-      operator_id,
-      operator_name: operator_name || "Commercial Fleet Partner",
+      operator_id: authoritativeOperatorId,
+      operator_name: authoritativeOperatorName,
       operator_rating: Number(operator_rating),
       reviews_count: Number(reviews_count),
       vehicle_id,
