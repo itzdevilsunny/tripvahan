@@ -27,11 +27,28 @@ import { useAuth } from "@/lib/authContext";
 import { DESTINATION_IMAGES, getVehicleImage } from "@/lib/mediaAssets";
 import AuthModal from "@/components/common/AuthModal";
 
-interface PlanTripViewProps {
-  onPublished: (trip: TripRequest) => void;
+export interface InitialCircuit {
+  origin?: string;
+  destination?: string;
+  title?: string;
+  duration?: string;
+  distanceKm?: number;
+  budget?: number;
+  route?: string;
+  paxRecommendation?: string;
 }
 
-export default function PlanTripView({ onPublished }: PlanTripViewProps) {
+interface PlanTripViewProps {
+  onPublished: (trip: TripRequest) => void;
+  initialCircuit?: InitialCircuit | null;
+  onClearInitialCircuit?: () => void;
+}
+
+export default function PlanTripView({
+  onPublished,
+  initialCircuit,
+  onClearInitialCircuit,
+}: PlanTripViewProps) {
   const { user, profile } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
 
@@ -56,6 +73,40 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
   ]);
   const [newStopInput, setNewStopInput] = useState("");
   const [showAddStop, setShowAddStop] = useState(false);
+
+  // Synchronize when initialCircuit is passed from ExploreView
+  React.useEffect(() => {
+    if (initialCircuit) {
+      if (initialCircuit.origin) setOrigin(initialCircuit.origin);
+      if (initialCircuit.destination) setDestination(initialCircuit.destination);
+      if (initialCircuit.duration) setDuration(initialCircuit.duration);
+      if (initialCircuit.distanceKm) setDistanceKm(initialCircuit.distanceKm);
+      if (initialCircuit.budget) setTargetBudget(initialCircuit.budget);
+
+      if (initialCircuit.route) {
+        const parts = initialCircuit.route.split("→").map((s) => s.trim());
+        if (parts.length > 2) {
+          setStops(parts.slice(1, -1));
+        }
+      }
+
+      if (initialCircuit.paxRecommendation) {
+        if (initialCircuit.paxRecommendation.includes("10–14") || initialCircuit.paxRecommendation.includes("12–16")) {
+          setAdults(10);
+          setSeniors(2);
+          setTrolleys(10);
+          setDuffles(2);
+        } else if (initialCircuit.paxRecommendation.includes("6–7")) {
+          setAdults(5);
+          setSeniors(1);
+          setTrolleys(5);
+          setDuffles(1);
+        }
+      }
+
+      setRouteNote(`Pre-loaded from curated circuit: ${initialCircuit.title || initialCircuit.destination}`);
+    }
+  }, [initialCircuit]);
 
   // Passengers & Luggage
   const [adults, setAdults] = useState(8);
@@ -240,6 +291,34 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
           </p>
         </div>
       </div>
+
+      {/* Pre-populated Circuit Badge */}
+      {initialCircuit && (
+        <div className="bg-[#DDF7ED] border border-[#075E54]/25 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <span className="w-7 h-7 rounded-full bg-[#075E54] text-white flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-4 h-4 text-[#DDF7ED]" />
+            </span>
+            <div>
+              <p className="font-bold text-[#075E54]">
+                Preloaded: {initialCircuit.title || `${origin} → ${destination}`}
+              </p>
+              <p className="text-[11px] text-[#172B2A]/80">
+                Route benchmarks loaded. Customize your travel dates, passenger group, and pickup below.
+              </p>
+            </div>
+          </div>
+          {onClearInitialCircuit && (
+            <button
+              type="button"
+              onClick={onClearInitialCircuit}
+              className="text-[11px] font-semibold text-[#075E54] hover:underline shrink-0 cursor-pointer"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 2. Trip Type Switcher matching Column 4 mockup: [One Way] [Round Trip] [Multi-City] */}
       <div className="bg-white rounded-2xl p-4 border border-[#E5EAF0] shadow-xs space-y-2">

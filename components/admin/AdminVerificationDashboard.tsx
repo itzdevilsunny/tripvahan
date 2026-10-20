@@ -27,11 +27,13 @@ import {
 } from "lucide-react";
 import { ComplianceDocument, OperatorVerificationDetail, VerificationAuditEntry } from "@/lib/types";
 import { supabase } from "@/lib/supabase";
+import AuthModal from "@/components/common/AuthModal";
 
 export default function AdminVerificationDashboard() {
   const [operators, setOperators] = useState<OperatorVerificationDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [showAdminAuthModal, setShowAdminAuthModal] = useState(false);
   const [selectedOperator, setSelectedOperator] = useState<OperatorVerificationDetail | null>(null);
   const [filterTab, setFilterTab] = useState<"all" | "pending" | "verified" | "rejected">("pending");
   const [searchQuery, setSearchQuery] = useState("");
@@ -218,12 +220,21 @@ export default function AdminVerificationDashboard() {
 
       {/* Access Restriction Banner */}
       {authError && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-4 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <h4 className="text-sm font-bold text-amber-900">Administrator Access Required</h4>
-            <p className="text-xs text-amber-700 mt-1">{authError}</p>
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <h4 className="text-sm font-bold text-amber-900">Administrator Access Required</h4>
+              <p className="text-xs text-amber-700 mt-0.5">{authError}</p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowAdminAuthModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-[#075E54] hover:bg-[#064e46] text-white text-xs font-semibold shrink-0 shadow-xs transition-colors cursor-pointer"
+          >
+            Sign In as Admin (1-Click Demo)
+          </button>
         </div>
       )}
 
@@ -769,6 +780,15 @@ export default function AdminVerificationDashboard() {
           </div>
         </div>
       )}
+
+      {/* Admin Demo Auth Modal */}
+      <AuthModal
+        isOpen={showAdminAuthModal}
+        onClose={() => {
+          setShowAdminAuthModal(false);
+          fetchOperators();
+        }}
+      />
     </div>
   );
 }

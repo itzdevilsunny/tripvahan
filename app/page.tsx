@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import BottomNav, { TabType } from "@/components/BottomNav";
-import PlanTripView from "@/components/traveller/PlanTripView";
+import PlanTripView, { InitialCircuit } from "@/components/traveller/PlanTripView";
 import CabOffersView from "@/components/traveller/CabOffersView";
 import BookingModal from "@/components/traveller/BookingModal";
 import BookingsView from "@/components/traveller/BookingsView";
@@ -15,15 +15,17 @@ import AdminVerificationDashboard from "@/components/admin/AdminVerificationDash
 import { Booking, Quotation, TripRequest, UserRole } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
 import { useAuth } from "@/lib/authContext";
-import { CheckCircle2, ArrowRight } from "lucide-react";
+import { CheckCircle2, ArrowRight, Sparkles, ChevronDown, ChevronUp, ShieldCheck, Car } from "lucide-react";
 
 export default function Home() {
   const { role: authRole, switchActiveRole } = useAuth();
   const [role, setRole] = useState<UserRole>("traveller");
-  const [currentTab, setCurrentTab] = useState<TabType>("offers");
+  const [currentTab, setCurrentTab] = useState<TabType>("explore");
 
   // Selection states
   const [activeTrip, setActiveTrip] = useState<TripRequest | null>(null);
+  const [selectedCircuit, setSelectedCircuit] = useState<InitialCircuit | null>(null);
+  const [showHackathonGuide, setShowHackathonGuide] = useState(true);
   const [selectedQuoteForBooking, setSelectedQuoteForBooking] = useState<Quotation | null>(null);
   const [quoteTargetTrip, setQuoteTargetTrip] = useState<TripRequest | null>(null);
 
@@ -79,6 +81,7 @@ export default function Home() {
   // Traveler publishes trip
   const handleTripPublished = (newTrip: TripRequest) => {
     setActiveTrip(newTrip);
+    setSelectedCircuit(null);
     refreshCounts();
     showToast(
       `Trip request #${newTrip.trip_code} published! Verified fleet partners are now discovering your itinerary.`
@@ -117,7 +120,8 @@ export default function Home() {
   };
 
   // Traveler picks circuit from Explore
-  const handleSelectCircuitFromExplore = () => {
+  const handleSelectCircuitFromExplore = (circuit: InitialCircuit) => {
+    setSelectedCircuit(circuit);
     setCurrentTab("plan");
   };
 
@@ -146,6 +150,89 @@ export default function Home() {
 
       {/* Main View Area */}
       <main className="flex-1 w-full">
+        {/* Interactive Hackathon Demo Guide Banner */}
+        {showHackathonGuide && (
+          <div className="max-w-xl mx-auto px-3 sm:px-4 pt-3 pb-1">
+            <div className="bg-gradient-to-r from-[#172B2A] to-[#075E54] text-white rounded-2xl p-3.5 shadow-sm border border-emerald-900/60 transition-all">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-lg bg-[#DDF7ED] text-[#075E54] flex items-center justify-center font-bold text-xs">
+                    🚀
+                  </span>
+                  <div>
+                    <h2 className="text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
+                      Hackathon Demo Walkthrough
+                      <span className="bg-[#DDF7ED]/20 text-[#DDF7ED] text-[9px] px-1.5 py-0.2 rounded-full font-semibold">
+                        Full Lifecycle Active
+                      </span>
+                    </h2>
+                    <p className="text-[10px] text-emerald-100/80">
+                      Follow 3 simple steps to experience the complete marketplace:
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowHackathonGuide(false)}
+                  className="text-white/60 hover:text-white text-xs px-1.5 py-0.5 rounded cursor-pointer"
+                  title="Dismiss guide"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5 mt-2.5 pt-2.5 border-t border-white/10 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleRoleChange("traveller");
+                    setCurrentTab("explore");
+                  }}
+                  className={`p-2 rounded-xl text-left transition-all cursor-pointer ${
+                    role === "traveller"
+                      ? "bg-white text-[#172B2A] font-semibold shadow-xs"
+                      : "bg-white/10 hover:bg-white/15 text-white"
+                  }`}
+                >
+                  <span className="block font-bold text-[10px]">1. Traveller</span>
+                  <span className="block text-[9px] opacity-80 truncate">Pick circuit & publish</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleRoleChange("operator");
+                    setCurrentTab("requests");
+                  }}
+                  className={`p-2 rounded-xl text-left transition-all cursor-pointer ${
+                    role === "operator"
+                      ? "bg-[#DDF7ED] text-[#075E54] font-semibold shadow-xs"
+                      : "bg-white/10 hover:bg-white/15 text-white"
+                  }`}
+                >
+                  <span className="block font-bold text-[10px]">2. Fleet Partner</span>
+                  <span className="block text-[9px] opacity-80 truncate">Bid & submit quote</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleRoleChange("admin");
+                  }}
+                  className={`p-2 rounded-xl text-left transition-all cursor-pointer ${
+                    role === "admin"
+                      ? "bg-amber-300 text-amber-950 font-semibold shadow-xs"
+                      : "bg-white/10 hover:bg-white/15 text-white"
+                  }`}
+                >
+                  <span className="block font-bold text-[10px]">3. Admin Portal</span>
+                  <span className="block text-[9px] opacity-80 truncate">Verify KYC & permits</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Traveller Views */}
         {role === "traveller" && (
           <>
@@ -154,7 +241,11 @@ export default function Home() {
             )}
 
             {currentTab === "plan" && (
-              <PlanTripView onPublished={handleTripPublished} />
+              <PlanTripView
+                onPublished={handleTripPublished}
+                initialCircuit={selectedCircuit}
+                onClearInitialCircuit={() => setSelectedCircuit(null)}
+              />
             )}
 
             {currentTab === "offers" && (
@@ -199,7 +290,11 @@ export default function Home() {
             )}
 
             {currentTab === "plan" && (
-              <PlanTripView onPublished={handleTripPublished} />
+              <PlanTripView
+                onPublished={handleTripPublished}
+                initialCircuit={selectedCircuit}
+                onClearInitialCircuit={() => setSelectedCircuit(null)}
+              />
             )}
 
             {currentTab === "bookings" && (
