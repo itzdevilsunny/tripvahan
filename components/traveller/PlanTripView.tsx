@@ -20,12 +20,14 @@ import {
   Trash2,
   RefreshCw,
   MapPin,
+  Sparkles,
 } from "lucide-react";
 import { dataService } from "@/lib/dataService";
 import { TripRequest } from "@/lib/types";
 import { useAuth } from "@/lib/authContext";
 import { DESTINATION_IMAGES, getVehicleImage } from "@/lib/mediaAssets";
 import AuthModal from "@/components/common/AuthModal";
+import AiTripPlannerModal, { TransferredAiPlan } from "./AiTripPlannerModal";
 
 export interface InitialCircuit {
   origin?: string;
@@ -130,6 +132,66 @@ export default function PlanTripView({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [draftSaved, setDraftSaved] = useState(false);
+
+  // AI Trip Planner States
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
+  const [aiPrefilledFields, setAiPrefilledFields] = useState<string[]>([]);
+
+  const handleAiPlanTransferred = (plan: TransferredAiPlan) => {
+    const prefilled: string[] = [];
+    if (plan.origin) {
+      setOrigin(plan.origin);
+      prefilled.push("Origin");
+    }
+    if (plan.destination) {
+      setDestination(plan.destination);
+      prefilled.push("Destination");
+    }
+    if (plan.stops && plan.stops.length > 0) {
+      setStops(plan.stops);
+      prefilled.push("Stops");
+    }
+    if (plan.circuit_type) {
+      setCircuitType(plan.circuit_type);
+      prefilled.push("Trip Type");
+    }
+    if (plan.duration) {
+      setDuration(plan.duration);
+      prefilled.push("Duration");
+    }
+    if (plan.distance_km) {
+      setDistanceKm(plan.distance_km);
+      prefilled.push("Distance");
+    }
+    if (plan.adults_count) {
+      setAdults(plan.adults_count);
+      prefilled.push("Adults");
+    }
+    if (plan.seniors_count) {
+      setSeniors(plan.seniors_count);
+      prefilled.push("Seniors");
+    }
+    if (plan.luggage_bags) {
+      setTrolleys(plan.luggage_bags);
+      prefilled.push("Luggage");
+    }
+    if (plan.target_budget) {
+      setTargetBudget(plan.target_budget);
+      prefilled.push("Budget");
+    }
+    if (plan.amenities && plan.amenities.length > 0) {
+      setAmenities(plan.amenities);
+      prefilled.push("Amenities");
+    }
+
+    setAiPrefilledFields(prefilled);
+    const engineLabel =
+      plan.engine === "gemini_live" ? "Gemini 1.5 Flash (Live)" : "Intelligent NLP Corridors";
+    setAiNotice(
+      `Itinerary pre-filled via ${engineLabel}. All parameters remain completely editable. Review and click "Submit Quote" to publish.`
+    );
+  };
 
   const perPersonCost = totalPax > 0 ? Math.round(targetBudget / totalPax) : 0;
 
@@ -317,6 +379,65 @@ export default function PlanTripView({
               Reset
             </button>
           )}
+        </div>
+      )}
+
+      {/* AI Trip Planner Action Banner */}
+      <div className="bg-gradient-to-r from-emerald-900 via-[#075E54] to-teal-800 rounded-2xl p-4 sm:p-5 text-white shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border border-emerald-700/40">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+            </span>
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-200">
+              AI Trip Planner
+            </span>
+          </div>
+          <p className="text-xs text-white/90">
+            Have a custom trip in mind? Describe it naturally (e.g. <em>&quot;5 days Delhi to Manali for 8 people with luggage&quot;</em>) and let AI build your plan.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAiModal(true)}
+          className="shrink-0 bg-white hover:bg-emerald-50 text-[#075E54] px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-xs cursor-pointer"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-[#075E54]" />
+          <span>AI Plan My Trip</span>
+        </button>
+      </div>
+
+      {/* AI Transfer Notice */}
+      {aiNotice && (
+        <div className="bg-[#DDF7ED] border border-[#075E54]/30 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <span className="w-7 h-7 rounded-full bg-[#075E54] text-white flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 text-[#DDF7ED]" />
+            </span>
+            <div>
+              <p className="font-bold text-[#075E54]">AI Recommendation Applied</p>
+              <p className="text-[11px] text-[#172B2A]/80">{aiNotice}</p>
+              {aiPrefilledFields.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {aiPrefilledFields.map((f, i) => (
+                    <span
+                      key={i}
+                      className="text-[10px] font-medium bg-[#075E54]/10 text-[#075E54] px-2 py-0.5 rounded-md"
+                    >
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAiNotice(null)}
+            className="text-[11px] font-semibold text-[#075E54] hover:underline shrink-0 cursor-pointer"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -753,6 +874,13 @@ export default function PlanTripView({
 
       {/* Auth Modal for unauthenticated trip publication */}
       <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+
+      {/* AI Trip Planner Modal */}
+      <AiTripPlannerModal
+        isOpen={showAiModal}
+        onClose={() => setShowAiModal(false)}
+        onTransferToForm={handleAiPlanTransferred}
+      />
     </div>
   );
 }

@@ -39,19 +39,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         const isOperator = (userMeta?.role as UserRole) === "operator";
+        const fallbackRole: UserRole = isOperator ? "operator" : "traveller";
         const fallbackProfile: Profile = {
           id: userId,
           full_name: userMeta?.full_name || userMeta?.name || "User",
           email: userMeta?.email || "",
-          role: (userMeta?.role as UserRole) || "traveller",
-          operator_name: userMeta?.operator_name || undefined,
-          verified: isOperator ? false : true,
+          role: fallbackRole,
+          operator_name: isOperator ? userMeta?.operator_name : undefined,
+          verified: false,
           created_at: new Date().toISOString(),
         };
         setProfile(fallbackProfile);
-        if (userMeta?.role) {
-          setRole(userMeta.role as UserRole);
-        }
+        setRole(fallbackRole);
       }
     } catch {
       // In case Supabase schema is not yet executed
@@ -96,6 +95,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     chosenRole: UserRole,
     operatorName?: string
   ): Promise<{ error: string | null }> => {
+    // Security restriction: Platform administrator privileges cannot be self-registered
+    if (chosenRole === "admin") {
+      return {
+        error: "Security violation: Platform administrator accounts cannot be self-registered or created via public registration.",
+      };
+    }
+
+    const safeRole: UserRole = chosenRole === "operator" ? "operator" : "traveller";
+
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -103,8 +111,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         options: {
           data: {
             full_name: fullName,
-            role: chosenRole,
-            operator_name: operatorName || null,
+            role: safeRole,
+            operator_name: safeRole === "operator" ? (operatorName || null) : null,
           },
         },
       });
@@ -114,16 +122,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data.user) {
-        // Attempt to create or upsert profile in public.profiles
+        // Attempt to create or upsert profile in public.profiles with safe role & unverified operator status
         try {
           await supabase.from("profiles").upsert({
             id: data.user.id,
             full_name: fullName,
             email,
-            role: chosenRole,
-            operator_name: operatorName || null,
-            verified: chosenRole === "operator" ? false : true,
-            rating: chosenRole === "operator" ? 4.90 : 5.0,
+            role: safeRole,
+            operator_name: safeRole === "operator" ? (operatorName || null) : null,
+            verified: false, // Security: All new operators require platform admin approval before quoting
+            rating: safeRole === "operator" ? 4.90 : 5.0,
             reviews_count: 0,
           });
         } catch {
@@ -131,8 +139,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         await fetchProfile(data.user.id, {
           full_name: fullName,
-          role: chosenRole,
-          operator_name: operatorName,
+          role: safeRole,
+          operator_name: safeRole === "operator" ? operatorName : undefined,
           email,
         });
       }

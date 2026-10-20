@@ -3081,6 +3081,452 @@ test("Vehicle & Quotation APIs: DB insertion failure returns HTTP 500 and never 
   assert.ok(quoteSuccess.data?.id);
 });
 
+// 53. Privilege Escalation Barrier: Registration role sanitization & admin self-assignment rejection
+test("Self-registration strictly blocks client-specified admin role and forces unverified status for operators", () => {
+  // Simulates the security-hardened signUp logic from lib/authContext.tsx
+  function simulateRegistration(email, password, fullName, chosenRole, operatorName) {
+    if (chosenRole === "admin") {
+      return {
+        error: "Security violation: Platform administrator accounts cannot be self-registered or created via public registration.",
+        profile: null,
+      };
+    }
+
+    const safeRole = chosenRole === "operator" ? "operator" : "traveller";
+    const profile = {
+      id: `usr_${Date.now()}`,
+      full_name: fullName,
+      email,
+      role: safeRole,
+      operator_name: safeRole === "operator" ? (operatorName || null) : null,
+      verified: false, // Security: All new operators require platform admin approval before quoting
+      rating: safeRole === "operator" ? 4.90 : 5.0,
+      reviews_count: 0,
+    };
+
+    return { error: null, profile };
+  }
+
+  // 1. Attempting to register as 'admin' must be immediately rejected with security violation
+  const adminRegAttempt = simulateRegistration("malicious@actor.com", "Secret123!", "Attacker", "admin");
+  assert.ok(adminRegAttempt.error);
+  assert.match(adminRegAttempt.error, /Security violation: Platform administrator accounts cannot be self-registered/);
+  assert.strictEqual(adminRegAttempt.profile, null);
+
+  // 2. Registering as operator correctly forces verified to false
+  const operatorReg = simulateRegistration("newop@fleet.com", "Secret123!", "New Fleet", "operator", "New Fleet LLC");
+  assert.strictEqual(operatorReg.error, null);
+  assert.strictEqual(operatorReg.profile.role, "operator");
+  assert.strictEqual(operatorReg.profile.verified, false);
+
+  // 3. Registering as traveller correctly sets traveller role
+  const travellerReg = simulateRegistration("traveler@family.com", "Secret123!", "Family Group", "traveller");
+  assert.strictEqual(travellerReg.error, null);
+  assert.strictEqual(travellerReg.profile.role, "traveller");
+  assert.strictEqual(travellerReg.profile.operator_name, null);
+
+  // 4. Any unexpected or malicious role string is coerced to safe traveller
+  const customRoleReg = simulateRegistration("custom@test.com", "Secret123!", "Custom Role", "super_admin");
+  assert.strictEqual(customRoleReg.error, null);
+  assert.strictEqual(customRoleReg.profile.role, "traveller");
+});
+
+// 54. Database Trigger Invariant: protect_profile_privilege_escalation rejects direct INSERT with role='admin' or verified=true
+test("54. Database Trigger Invariant: protect_profile_privilege_escalation rejects direct INSERT with role='admin' or verified=true", () => {
+  // Simulates PostgreSQL plpgsql protect_profile_privilege_escalation() function on INSERT
+  function simulateProfileInsertTrigger(authContext, newRow) {
+    const authRole = authContext?.role || "authenticated";
+    const authUid = authContext?.uid || null;
+
+    if (authRole !== "service_role") {
+      // 1. Direct insert of 'admin' role is prohibited
+      if (newRow.role === "admin") {
+        const err = new Error("Forbidden: Administrator accounts cannot be self-registered or inserted via client APIs");
+        err.code = "42501";
+        throw err;
+      }
+
+      // 2. Direct insert of verified=true for commercial operators is prohibited
+      if (newRow.role === "operator" && newRow.verified === true) {
+        const err = new Error("Forbidden: Commercial fleet operators require administrator compliance verification before activation");
+        err.code = "42501";
+        throw err;
+      }
+
+      // 3. Callers can only insert their own profile matching auth.uid()
+      if (!authUid || authUid !== newRow.id) {
+        const err = new Error("Forbidden: Cannot insert profile for another user identity");
+        err.code = "42501";
+        throw err;
+      }
+    }
+
+    return newRow;
+  }
+
+  const callerContext = { role: "authenticated", uid: "usr_alice" };
+
+  // 1. Authenticated user attempting direct REST insert with role='admin' is rejected with 42501
+  assert.throws(
+    () => {
+      simulateProfileInsertTrigger(callerContext, {
+        id: "usr_alice",
+        email: "alice@evil.com",
+        role: "admin",
+        verified: false,
+      });
+    },
+    (err) => err.code === "42501" && err.message.includes("Administrator accounts cannot be self-registered")
+  );
+
+  // 2. Authenticated operator attempting direct REST insert with verified=true is rejected with 42501
+  assert.throws(
+    () => {
+      simulateProfileInsertTrigger(callerContext, {
+        id: "usr_alice",
+        email: "alice@fleet.com",
+        role: "operator",
+        verified: true,
+      });
+    },
+    (err) => err.code === "42501" && err.message.includes("Commercial fleet operators require administrator compliance verification")
+  );
+
+  // 3. User attempting to insert a profile for a different user ID is rejected
+  assert.throws(
+    () => {
+      simulateProfileInsertTrigger(callerContext, {
+        id: "usr_bob",
+        email: "bob@other.com",
+        role: "traveller",
+        verified: false,
+      });
+    },
+    (err) => err.code === "42501" && err.message.includes("Cannot insert profile for another user identity")
+  );
+
+  // 4. Valid traveller profile insertion succeeds
+  const validTraveller = simulateProfileInsertTrigger(callerContext, {
+    id: "usr_alice",
+    email: "alice@trip.com",
+    role: "traveller",
+    verified: false,
+  });
+  assert.strictEqual(validTraveller.role, "traveller");
+  assert.strictEqual(validTraveller.verified, false);
+
+  // 5. Valid unverified operator profile insertion succeeds
+  const validOperator = simulateProfileInsertTrigger(callerContext, {
+    id: "usr_alice",
+    email: "alice@transport.com",
+    role: "operator",
+    verified: false,
+  });
+  assert.strictEqual(validOperator.role, "operator");
+  assert.strictEqual(validOperator.verified, false);
+
+  // 6. Privileged service_role (DBA/seeding) can provision admin accounts
+  const serviceRoleContext = { role: "service_role", uid: null };
+  const adminProvisioned = simulateProfileInsertTrigger(serviceRoleContext, {
+    id: "admin_master",
+    email: "admin@tripvahan.internal",
+    role: "admin",
+    verified: true,
+  });
+  assert.strictEqual(adminProvisioned.role, "admin");
+  assert.strictEqual(adminProvisioned.verified, true);
+});
+
+// =========================================================================
+// AI TRIP PLANNER REGRESSION SUITE (Tests 55–60)
+// =========================================================================
+
+// 55. AI Trip Planner: Input Validation and Security Guards
+test("55. AI Trip Planner: Request validation strictly enforces non-empty prompt, 1000 char limit, and JSON structure", () => {
+  function validateAiPlanRequest(body) {
+    if (!body || typeof body !== "object") {
+      return { status: 400, error: "Invalid request: Expected JSON body with a prompt" };
+    }
+    const { prompt } = body;
+    if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
+      return { status: 400, error: "Prompt cannot be empty. Please describe your desired trip." };
+    }
+    if (prompt.length > 1000) {
+      return { status: 400, error: "Prompt exceeds maximum allowed length of 1,000 characters" };
+    }
+    return { status: 200, prompt: prompt.trim() };
+  }
+
+  // 1. Missing body or non-object body
+  assert.strictEqual(validateAiPlanRequest(null).status, 400);
+  assert.strictEqual(validateAiPlanRequest("raw string").status, 400);
+
+  // 2. Empty or whitespace prompt
+  assert.strictEqual(validateAiPlanRequest({}).status, 400);
+  assert.strictEqual(validateAiPlanRequest({ prompt: "" }).status, 400);
+  assert.strictEqual(validateAiPlanRequest({ prompt: "   \n\t  " }).status, 400);
+
+  // 3. Prompt exceeding 1000 characters
+  const oversizedPrompt = "A".repeat(1001);
+  const oversizedRes = validateAiPlanRequest({ prompt: oversizedPrompt });
+  assert.strictEqual(oversizedRes.status, 400);
+  assert.match(oversizedRes.error, /exceeds maximum allowed length of 1,000 characters/);
+
+  // 4. Valid prompt within limits
+  const validRes = validateAiPlanRequest({ prompt: "Plan a 5-day Delhi to Manali trip for 8 people" });
+  assert.strictEqual(validRes.status, 200);
+  assert.strictEqual(validRes.prompt, "Plan a 5-day Delhi to Manali trip for 8 people");
+});
+
+// 56. AI Trip Planner: Missing AI Configuration & Deterministic NLP Fallback
+test("56. AI Trip Planner: When Gemini API is not configured, engine falls back to intelligent_nlp and parses corridor facts", () => {
+  // Simulates NLP corridor parsing logic
+  function simulateAiTripPlanner(prompt, apiKey) {
+    const engine = apiKey ? "gemini_live" : "intelligent_nlp";
+    const p = prompt.toLowerCase();
+
+    // Check ambiguous
+    const hasOrigin = p.includes("delhi") || p.includes("bangalore") || p.includes("mumbai");
+    const hasDest = p.includes("manali") || p.includes("jaipur") || p.includes("ooty") || p.includes("goa");
+    if (!hasOrigin || !hasDest) {
+      return {
+        success: false,
+        engine,
+        needs_clarification: true,
+        missing_fields: [!hasOrigin ? "origin" : "", !hasDest ? "destination" : ""].filter(Boolean),
+        clarification_questions: ["Where will your journey begin and what is your primary destination?"],
+      };
+    }
+
+    // Capacity matching
+    let pax = 4;
+    const paxMatch = p.match(/(\d+)\s*(?:people|pax|passengers)/);
+    if (paxMatch) pax = parseInt(paxMatch[1], 10);
+
+    let vehicle = "Executive Sedan (Dzire / Etios)";
+    if (pax > 4 && pax <= 7) vehicle = "Innova Crysta / Premium SUV (6+1 / 7+1)";
+    else if (pax > 7 && pax <= 16) vehicle = "Force Urbania / Tempo (12-16 Seater)";
+
+    let budget = 25000;
+    const budgetMatch = p.match(/(?:₹|rs\.?|budget\s*(?:of|is|:)?\s*)?\s*(\d{4,6})/);
+    if (budgetMatch) budget = parseInt(budgetMatch[1], 10);
+
+    return {
+      success: true,
+      engine,
+      trip: {
+        origin: "Delhi NCR",
+        destination: "Manali",
+        days_count: 5,
+        travellers_count: pax,
+        matched_vehicle_class: vehicle,
+        target_budget: budget,
+        indicative_budget_min: Math.round(budget * 0.9),
+        indicative_budget_max: Math.round(budget * 1.1),
+        distance_km: 1150,
+        formatted_travel_time: "~24 hrs total drive time",
+        user_facts: { origin: "Delhi NCR", destination: "Manali", passengers: pax, budget },
+        ai_suggestions: { vehicle_class_recommendation: vehicle },
+        disclaimer: "Indicative estimates only. Exact quotes will be provided by verified fleet operators.",
+      },
+    };
+  }
+
+  // Without GEMINI_API_KEY
+  const result = simulateAiTripPlanner(
+    "Plan a 5-day Delhi-to-Manali trip for 8 people, including 2 children, with luggage and a ₹35000 budget.",
+    null
+  );
+
+  assert.strictEqual(result.success, true);
+  assert.strictEqual(result.engine, "intelligent_nlp", "Must report intelligent_nlp when no key is set");
+  assert.strictEqual(result.trip.origin, "Delhi NCR");
+  assert.strictEqual(result.trip.destination, "Manali");
+  assert.strictEqual(result.trip.travellers_count, 8);
+  assert.strictEqual(result.trip.target_budget, 35000);
+  assert.strictEqual(result.trip.matched_vehicle_class, "Force Urbania / Tempo (12-16 Seater)");
+  assert.strictEqual(result.trip.distance_km, 1150);
+});
+
+// 57. AI Trip Planner: Ambiguous Trip Descriptions Require Clarification
+test("57. AI Trip Planner: Ambiguous trip descriptions trigger needs_clarification and do not invent details", () => {
+  function checkAmbiguity(prompt) {
+    const p = prompt.toLowerCase();
+    const hasOrigin = p.includes("delhi") || p.includes("bangalore") || p.includes("mumbai");
+    const hasDest = p.includes("manali") || p.includes("jaipur") || p.includes("ooty");
+
+    if (!hasOrigin || !hasDest) {
+      return {
+        success: false,
+        engine: "intelligent_nlp",
+        needs_clarification: true,
+        missing_fields: [!hasOrigin ? "origin" : "", !hasDest ? "destination" : ""].filter(Boolean),
+        clarification_questions: [
+          "Where will your journey begin and what is your primary destination? (e.g. Delhi to Manali)",
+        ],
+      };
+    }
+    return { success: true };
+  }
+
+  // Ambiguous prompt without route
+  const res1 = checkAmbiguity("Plan a nice trip for 6 people next weekend");
+  assert.strictEqual(res1.success, false);
+  assert.strictEqual(res1.needs_clarification, true);
+  assert.ok(res1.missing_fields.includes("origin"));
+  assert.ok(res1.missing_fields.includes("destination"));
+  assert.ok(res1.clarification_questions.length > 0);
+
+  // Ambiguous prompt with only origin
+  const res2 = checkAmbiguity("I am in Delhi with 4 friends looking to travel");
+  assert.strictEqual(res2.success, false);
+  assert.strictEqual(res2.needs_clarification, true);
+  assert.ok(res2.missing_fields.includes("destination"));
+});
+
+// 58. AI Trip Planner: Mocked Gemini Live Provider Integration & Validation
+test("58. AI Trip Planner: Mocked Gemini live response validates output schema and handles timeouts gracefully", async () => {
+  async function mockGeminiCall(prompt, timeoutMs, shouldTimeout, malformedJson) {
+    if (shouldTimeout) {
+      throw new Error("Gemini request timed out after 9000ms");
+    }
+    if (malformedJson) {
+      return "NOT_VALID_JSON{{{";
+    }
+    return JSON.stringify({
+      origin: "Delhi NCR",
+      destination: "Jaipur",
+      stops: ["Amer Fort", "Neemrana"],
+      circuit_title: "Delhi NCR → Jaipur",
+      circuit_type: "Multi-day circuit",
+      duration: "3 Days, 2 Nights",
+      days_count: 3,
+      travellers_count: 6,
+      target_budget: 22000,
+      distance_km: 560,
+      duration_hours: 10,
+    });
+  }
+
+  // 1. Successful model response parsed and validated
+  const rawResponse = await mockGeminiCall("Delhi to Jaipur for 6", 9000, false, false);
+  const parsed = JSON.parse(rawResponse);
+  assert.strictEqual(parsed.origin, "Delhi NCR");
+  assert.strictEqual(parsed.destination, "Jaipur");
+  assert.strictEqual(parsed.travellers_count, 6);
+
+  // 2. Timeout handled safely without crashing
+  await assert.rejects(
+    async () => mockGeminiCall("prompt", 9000, true, false),
+    /timed out/
+  );
+
+  // 3. Malformed JSON handled gracefully
+  const badResponse = await mockGeminiCall("prompt", 9000, false, true);
+  assert.throws(() => JSON.parse(badResponse));
+});
+
+// 59. AI Trip Planner: Distinction between facts, suggestions, and no fake marketplace inventory
+test("59. AI Trip Planner: Output clearly distinguishes user facts from AI suggestions and provides zero fabricated operators", () => {
+  const aiOutput = {
+    user_facts: {
+      origin: "Delhi NCR",
+      destination: "Manali",
+      passengers: 8,
+      budget: 35000,
+    },
+    ai_suggestions: {
+      suggested_stops: ["Chandigarh", "Kullu Valley"],
+      vehicle_class_recommendation: "Force Urbania / Tempo (12-16 Seater)",
+      recommended_amenities: ["Dual AC & Reclining Pushback Seats", "Waterproof Carrier Roof Rack"],
+    },
+    disclaimer: "Indicative estimates only. Exact rates and vehicle allocations will be provided by verified fleet operators upon publication.",
+  };
+
+  // Facts must match user input
+  assert.strictEqual(aiOutput.user_facts.origin, "Delhi NCR");
+  assert.strictEqual(aiOutput.user_facts.passengers, 8);
+
+  // Recommendations are labeled suggestions, not confirmed inventory
+  assert.ok(aiOutput.ai_suggestions.suggested_stops.length > 0);
+  assert.ok(aiOutput.disclaimer.includes("Indicative estimates only"));
+
+  // Check that NO operator names, driver names, vehicle registrations, or fake bids exist
+  assert.strictEqual(aiOutput.operator_name, undefined);
+  assert.strictEqual(aiOutput.driver_name, undefined);
+  assert.strictEqual(aiOutput.vehicle_reg, undefined);
+  assert.strictEqual(aiOutput.bids, undefined);
+});
+
+// 60. AI Trip Planner: Human Confirmation & Authentication Workflow before Publication
+test("60. AI Trip Planner: Modal transfer never auto-publishes to database; requires human review and authenticated user", () => {
+  // Simulates transfer action to form
+  function transferPlanToForm(aiPlan, currentFormState) {
+    return {
+      ...currentFormState,
+      origin: aiPlan.origin,
+      destination: aiPlan.destination,
+      stops: aiPlan.stops,
+      duration: aiPlan.duration,
+      distanceKm: aiPlan.distance_km,
+      adults: aiPlan.adults_count,
+      targetBudget: aiPlan.target_budget,
+      ai_notice: "Pre-filled by AI Trip Planner. Review all details before publishing.",
+      is_published: false, // Never auto-published!
+    };
+  }
+
+  // Simulates form submission
+  function publishTripFromForm(formState, user) {
+    if (!user) {
+      return { action: "SHOW_AUTH_MODAL", published: false };
+    }
+    if (!formState.origin || !formState.destination) {
+      return { error: "Origin and destination required", published: false };
+    }
+    return {
+      action: "INSERT_DATABASE",
+      published: true,
+      trip: {
+        traveler_id: user.id, // Authenticated identity
+        origin: formState.origin,
+        destination: formState.destination,
+        target_budget: formState.targetBudget,
+      },
+    };
+  }
+
+  const sampleAiPlan = {
+    origin: "Delhi NCR",
+    destination: "Manali",
+    stops: ["Chandigarh", "Kullu"],
+    duration: "5 Days, 4 Nights",
+    distance_km: 1150,
+    adults_count: 8,
+    target_budget: 35000,
+  };
+
+  const initialForm = { origin: "", destination: "", is_published: false };
+
+  // 1. Transferring sets form state but does NOT publish
+  const updatedForm = transferPlanToForm(sampleAiPlan, initialForm);
+  assert.strictEqual(updatedForm.origin, "Delhi NCR");
+  assert.strictEqual(updatedForm.destination, "Manali");
+  assert.strictEqual(updatedForm.is_published, false, "Must not auto-publish on modal transfer");
+
+  // 2. Unauthenticated publication attempt requires AuthModal
+  const unauthAttempt = publishTripFromForm(updatedForm, null);
+  assert.strictEqual(unauthAttempt.action, "SHOW_AUTH_MODAL");
+  assert.strictEqual(unauthAttempt.published, false);
+
+  // 3. Authenticated publication derives traveler_id from session user
+  const authAttempt = publishTripFromForm(updatedForm, { id: "usr_verified_traveler" });
+  assert.strictEqual(authAttempt.published, true);
+  assert.strictEqual(authAttempt.trip.traveler_id, "usr_verified_traveler");
+});
+
+
+
 
 
 

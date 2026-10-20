@@ -233,7 +233,7 @@ export default function AdminVerificationDashboard() {
             onClick={() => setShowAdminAuthModal(true)}
             className="px-3.5 py-2 rounded-xl bg-[#075E54] hover:bg-[#064e46] text-white text-xs font-semibold shrink-0 shadow-xs transition-colors cursor-pointer"
           >
-            Sign In as Admin (1-Click Demo)
+            Administrator Sign In
           </button>
         </div>
       )}

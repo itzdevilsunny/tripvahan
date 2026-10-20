@@ -226,7 +226,7 @@ export default function Home() {
                   }`}
                 >
                   <span className="block font-bold text-[10px]">3. Admin Portal</span>
-                  <span className="block text-[9px] opacity-80 truncate">Verify KYC & permits</span>
+                  <span className="block text-[9px] opacity-80 truncate">Strict Server Gate</span>
                 </button>
               </div>
             </div>
@@ -237,7 +237,10 @@ export default function Home() {
         {role === "traveller" && (
           <>
             {currentTab === "explore" && (
-              <ExploreView onSelectCircuit={handleSelectCircuitFromExplore} />
+              <ExploreView
+                onSelectCircuit={handleSelectCircuitFromExplore}
+                onOpenAiPlanner={() => setCurrentTab("plan")}
+              />
             )}
 
             {currentTab === "plan" && (

@@ -555,7 +555,11 @@ DROP POLICY IF EXISTS "Self Profile Insert" ON public.profiles;
 CREATE POLICY "Self Profile Insert" ON public.profiles
   FOR INSERT
   TO authenticated
-  WITH CHECK (auth.uid()::text = id);
+  WITH CHECK (
+    auth.uid()::text = id 
+    AND (role IS NULL OR role IN ('traveller', 'operator'))
+    AND (role != 'operator' OR verified IS NOT TRUE)
+  );
 
 DROP POLICY IF EXISTS "Self Profile Update" ON public.profiles;
 CREATE POLICY "Self Profile Update" ON public.profiles
@@ -564,7 +568,7 @@ CREATE POLICY "Self Profile Update" ON public.profiles
   USING (auth.uid()::text = id)
   WITH CHECK (auth.uid()::text = id);
 
--- 1.3 Trigger: Block self-privilege escalation to admin or verified status
+-- 1.3 Trigger: Block self-privilege escalation to admin or verified status (on INSERT & UPDATE)
 CREATE OR REPLACE FUNCTION public.protect_profile_privilege_escalation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -572,27 +576,45 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-    -- Profile ID is strictly immutable
-    IF NEW.id IS DISTINCT FROM OLD.id THEN
+    -- Profile ID is strictly immutable on UPDATE
+    IF TG_OP = 'UPDATE' AND NEW.id IS DISTINCT FROM OLD.id THEN
         RAISE EXCEPTION 'Profile ID is immutable' USING ERRCODE = '42501';
     END IF;
 
     IF COALESCE(auth.role(), '') != 'service_role' THEN
-        -- Case 1: Caller modifying their own profile (self-privilege escalation strictly forbidden)
-        IF auth.uid()::text = NEW.id THEN
-            IF NEW.role IS DISTINCT FROM OLD.role THEN
-                RAISE EXCEPTION 'Forbidden: You cannot modify your own platform role' USING ERRCODE = '42501';
+        IF TG_OP = 'INSERT' THEN
+            -- Privilege Escalation Barrier: Direct insert of 'admin' role is prohibited
+            IF NEW.role = 'admin' THEN
+                RAISE EXCEPTION 'Forbidden: Administrator accounts cannot be self-registered or inserted via client APIs' USING ERRCODE = '42501';
             END IF;
-            IF NEW.verified IS DISTINCT FROM OLD.verified THEN
-                RAISE EXCEPTION 'Forbidden: You cannot modify your own verification status' USING ERRCODE = '42501';
+
+            -- Privilege Escalation Barrier: Direct insert of verified=true for commercial operators is prohibited
+            IF NEW.role = 'operator' AND NEW.verified IS TRUE THEN
+                RAISE EXCEPTION 'Forbidden: Commercial fleet operators require administrator compliance verification before activation' USING ERRCODE = '42501';
             END IF;
-        ELSE
-            -- Case 2: Modifying someone else's profile (requires platform administrator role)
-            IF NOT EXISTS (
-                SELECT 1 FROM public.profiles
-                WHERE id = auth.uid()::text AND role = 'admin'
-            ) THEN
-                RAISE EXCEPTION 'Forbidden: Administrator privileges required to modify user verification or role' USING ERRCODE = '42501';
+
+            -- Identity Ownership Barrier: Callers can only insert their own profile matching auth.uid()
+            IF auth.uid() IS NULL OR auth.uid()::text != NEW.id THEN
+                RAISE EXCEPTION 'Forbidden: Cannot insert profile for another user identity' USING ERRCODE = '42501';
+            END IF;
+
+        ELSIF TG_OP = 'UPDATE' THEN
+            -- Case 1: Caller modifying their own profile (self-privilege escalation strictly forbidden)
+            IF auth.uid()::text = NEW.id THEN
+                IF NEW.role IS DISTINCT FROM OLD.role THEN
+                    RAISE EXCEPTION 'Forbidden: You cannot modify your own platform role' USING ERRCODE = '42501';
+                END IF;
+                IF NEW.verified IS DISTINCT FROM OLD.verified THEN
+                    RAISE EXCEPTION 'Forbidden: You cannot modify your own verification status' USING ERRCODE = '42501';
+                END IF;
+            ELSE
+                -- Case 2: Modifying someone else's profile (requires platform administrator role)
+                IF NOT EXISTS (
+                    SELECT 1 FROM public.profiles
+                    WHERE id = auth.uid()::text AND role = 'admin'
+                ) THEN
+                    RAISE EXCEPTION 'Forbidden: Administrator privileges required to modify user verification or role' USING ERRCODE = '42501';
+                END IF;
             END IF;
         END IF;
     END IF;
@@ -604,7 +626,7 @@ $$;
 DROP TRIGGER IF EXISTS trg_check_profile_updates ON public.profiles;
 DROP TRIGGER IF EXISTS trg_protect_profile_privileges ON public.profiles;
 CREATE TRIGGER trg_protect_profile_privileges
-    BEFORE UPDATE ON public.profiles
+    BEFORE INSERT OR UPDATE ON public.profiles
     FOR EACH ROW
     EXECUTE FUNCTION public.protect_profile_privilege_escalation();
 

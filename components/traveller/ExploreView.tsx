@@ -22,9 +22,10 @@ interface ExploreViewProps {
     distanceKm: number;
     budget: number;
   }) => void;
+  onOpenAiPlanner?: () => void;
 }
 
-export default function ExploreView({ onSelectCircuit }: ExploreViewProps) {
+export default function ExploreView({ onSelectCircuit, onOpenAiPlanner }: ExploreViewProps) {
   const circuits = [
     {
       title: "Golden Triangle Circuit",
@@ -84,6 +85,31 @@ export default function ExploreView({ onSelectCircuit }: ExploreViewProps) {
           No algorithmic surge pricing. Post your trip requirements, get binding quotes from registered commercial fleet partners, and lock in your vehicle with confidence.
         </p>
       </div>
+
+      {/* AI Trip Planner Card in Explore */}
+      {onOpenAiPlanner && (
+        <div className="bg-gradient-to-r from-emerald-900 via-[#075E54] to-teal-800 rounded-2xl p-4 sm:p-5 text-white shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border border-emerald-700/40">
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-emerald-200" />
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-200">
+                AI Trip Planner
+              </span>
+            </div>
+            <p className="text-xs text-white/90">
+              Want a custom route or group itinerary? Describe it naturally and let AI analyze corridor benchmarks.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenAiPlanner}
+            className="shrink-0 bg-white hover:bg-emerald-50 text-[#075E54] px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>AI Plan My Trip</span>
+          </button>
+        </div>
+      )}
 
       {/* Popular Tourist Circuits */}
       <div className="space-y-3">

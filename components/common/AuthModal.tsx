@@ -24,7 +24,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
   if (!isOpen) return null;
 
-  const handleQuickSignIn = async (demoRole: "traveller" | "operator" | "admin") => {
+  const handleQuickSignIn = async (demoRole: "traveller" | "operator") => {
     setErrorMsg(null);
     setSuccessMsg(null);
     setSubmitting(true);
@@ -38,20 +38,12 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
             role: "traveller" as UserRole,
             operatorName: "",
           }
-        : demoRole === "operator"
-        ? {
+        : {
             email: "vikram.singh@tripvahan.demo",
             pass: "DemoOperator2026!",
             name: "Capt. Vikram Singh",
             role: "operator" as UserRole,
             operatorName: "Rajputana Mobility Solutions",
-          }
-        : {
-            email: "admin@tripvahan.demo",
-            pass: "DemoAdmin2026!",
-            name: "Platform Compliance Lead",
-            role: "admin" as UserRole,
-            operatorName: "",
           };
 
     setEmail(demoCreds.email);
@@ -219,41 +211,29 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   </span>
                   <span className="text-[10px] text-[#718096]">1-Click Demo Login</span>
                 </div>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     disabled={submitting}
                     onClick={() => handleQuickSignIn("traveller")}
-                    className="p-2 rounded-xl bg-white border border-[#E5EAF0] hover:border-[#075E54] hover:bg-[#DDF7ED]/40 text-left transition-all cursor-pointer shadow-2xs group disabled:opacity-50"
+                    className="p-2.5 rounded-xl bg-white border border-[#E5EAF0] hover:border-[#075E54] hover:bg-[#DDF7ED]/40 text-left transition-all cursor-pointer shadow-2xs group disabled:opacity-50"
                   >
-                    <span className="text-[11px] font-bold text-[#172B2A] group-hover:text-[#075E54] block truncate">
-                      Traveller
+                    <span className="text-xs font-bold text-[#172B2A] group-hover:text-[#075E54] block truncate">
+                      Traveller Demo
                     </span>
-                    <span className="text-[9px] text-[#718096] block truncate">Rohan Sharma</span>
+                    <span className="text-[10px] text-[#718096] block truncate">Rohan Sharma</span>
                   </button>
 
                   <button
                     type="button"
                     disabled={submitting}
                     onClick={() => handleQuickSignIn("operator")}
-                    className="p-2 rounded-xl bg-white border border-[#E5EAF0] hover:border-[#075E54] hover:bg-[#DDF7ED]/40 text-left transition-all cursor-pointer shadow-2xs group disabled:opacity-50"
+                    className="p-2.5 rounded-xl bg-white border border-[#E5EAF0] hover:border-[#075E54] hover:bg-[#DDF7ED]/40 text-left transition-all cursor-pointer shadow-2xs group disabled:opacity-50"
                   >
-                    <span className="text-[11px] font-bold text-[#172B2A] group-hover:text-[#075E54] block truncate">
-                      Partner
+                    <span className="text-xs font-bold text-[#172B2A] group-hover:text-[#075E54] block truncate">
+                      Fleet Partner Demo
                     </span>
-                    <span className="text-[9px] text-[#718096] block truncate">Vikram Singh</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => handleQuickSignIn("admin")}
-                    className="p-2 rounded-xl bg-white border border-[#E5EAF0] hover:border-[#075E54] hover:bg-[#DDF7ED]/40 text-left transition-all cursor-pointer shadow-2xs group disabled:opacity-50"
-                  >
-                    <span className="text-[11px] font-bold text-[#172B2A] group-hover:text-[#075E54] block truncate">
-                      Admin
-                    </span>
-                    <span className="text-[9px] text-[#718096] block truncate">Compliance</span>
+                    <span className="text-[10px] text-[#718096] block truncate">Capt. Vikram Singh</span>
                   </button>
                 </div>
               </div>
