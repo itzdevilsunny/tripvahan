@@ -25,6 +25,7 @@ import { dataService } from "@/lib/dataService";
 import { TripRequest } from "@/lib/types";
 import { useAuth } from "@/lib/authContext";
 import { DESTINATION_IMAGES, getVehicleImage } from "@/lib/mediaAssets";
+import AuthModal from "@/components/common/AuthModal";
 
 interface PlanTripViewProps {
   onPublished: (trip: TripRequest) => void;
@@ -32,6 +33,7 @@ interface PlanTripViewProps {
 
 export default function PlanTripView({ onPublished }: PlanTripViewProps) {
   const { user, profile } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Form state
   const [circuitType, setCircuitType] = useState<string>("Multi-day circuit");
@@ -158,9 +160,14 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
       return;
     }
 
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const travelerId = user?.id || "usr_guest_" + Date.now();
+      const travelerId = user.id;
       const travelerName = profile?.full_name || user?.email?.split("@")[0] || "Group Traveller";
 
       const newTrip = await dataService.createTripRequest({
@@ -664,6 +671,9 @@ export default function PlanTripView({ onPublished }: PlanTripViewProps) {
           <CheckCircle2 className="w-3.5 h-3.5 text-[#075E54]" /> Commercial Permits
         </span>
       </div>
+
+      {/* Auth Modal for unauthenticated trip publication */}
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
 import { Quotation, TripRequest, Vehicle } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
 import { useAuth } from "@/lib/authContext";
+import AuthModal from "@/components/common/AuthModal";
 
 interface QuoteSubmitterModalProps {
   tripRequest: TripRequest | null;
@@ -31,6 +32,7 @@ export default function QuoteSubmitterModal({
   onQuotationSubmitted,
 }: QuoteSubmitterModalProps) {
   const { user, profile } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>("");
 
@@ -52,8 +54,12 @@ export default function QuoteSubmitterModal({
 
   useEffect(() => {
     async function loadVehicles() {
-      const opId = profile?.id || user?.id || "op_rajputana";
-      const data = await dataService.getVehicles(opId);
+      if (!user?.id) {
+        setVehicles([]);
+        setSelectedVehicleId("");
+        return;
+      }
+      const data = await dataService.getVehicles(user.id);
       if (data.length > 0) {
         setVehicles(data);
         setSelectedVehicleId(data[0].id);
@@ -79,6 +85,14 @@ export default function QuoteSubmitterModal({
 
   const handleSubmit = async () => {
     setErrorMsg(null);
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+    if (profile && profile.role !== "operator") {
+      setErrorMsg("Fleet Operator Account Required: You must be registered as an operator to quote on itineraries.");
+      return;
+    }
     if (profile && profile.verified === false) {
       setErrorMsg("Compliance Verification Required: Unverified fleet operators cannot submit quotes to passenger circuits until approved by platform administrators.");
       return;
@@ -89,7 +103,7 @@ export default function QuoteSubmitterModal({
     }
     setIsSubmitting(true);
     try {
-      const opId = profile?.id || user?.id || "op_fleet_partner";
+      const opId = user.id;
       const opName = profile?.operator_name || profile?.full_name || "Commercial Fleet Partner";
 
       const newQuote = await dataService.submitQuotation({
@@ -469,6 +483,8 @@ export default function QuoteSubmitterModal({
           </div>
         </div>
       </div>
+
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </div>
   );
 }

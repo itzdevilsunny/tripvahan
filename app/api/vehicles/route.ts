@@ -128,8 +128,8 @@ export async function POST(req: Request) {
 
     if (error) {
       return NextResponse.json(
-        { data: newVehicle, warning: error.message, database_synced: false },
-        { status: 201 }
+        { error: `Database insertion failed: ${error.message}` },
+        { status: 500 }
       );
     }
 

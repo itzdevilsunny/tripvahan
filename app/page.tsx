@@ -161,6 +161,7 @@ export default function Home() {
               <CabOffersView
                 tripRequest={activeTrip}
                 onSelectQuotation={handleSelectQuotation}
+                onPlanNewTrip={() => setCurrentTab("plan")}
               />
             )}
 
@@ -193,6 +194,7 @@ export default function Home() {
               <CabOffersView
                 tripRequest={activeTrip}
                 onSelectQuotation={handleSelectQuotation}
+                onPlanNewTrip={() => setCurrentTab("plan")}
               />
             )}
 

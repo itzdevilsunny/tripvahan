@@ -21,9 +21,13 @@ import { useAuth } from "@/lib/authContext";
 import { DESTINATION_IMAGES, VEHICLE_IMAGES, getDestinationImage, getVehicleImage } from "@/lib/mediaAssets";
 import QuoteSubmitterModal from "./QuoteSubmitterModal";
 import OperatorDocumentManager from "./OperatorDocumentManager";
+import AuthModal from "@/components/common/AuthModal";
 
 export default function PartnerHubView() {
   const { user, profile } = useAuth();
+  const opId = user?.id || "";
+  const opName = profile?.operator_name || profile?.full_name || (user ? "Commercial Fleet Partner" : "Fleet Partner");
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [recentTrips, setRecentTrips] = useState<TripRequest[]>([]);
@@ -42,12 +46,17 @@ export default function PartnerHubView() {
   const [isRegistering, setIsRegistering] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const opId = profile?.id || user?.id || "op_rajputana";
-  const opName = profile?.operator_name || profile?.full_name || "Rajputana Mobility Solutions";
-
   const loadData = async () => {
     setLoading(true);
-    const vList = await dataService.getVehicles(opId);
+    if (!user?.id) {
+      setVehicles([]);
+      setBookings([]);
+      const tList = await dataService.getTripRequests();
+      setRecentTrips(tList.slice(0, 3));
+      setLoading(false);
+      return;
+    }
+    const vList = await dataService.getVehicles(user.id);
     setVehicles(vList);
     const bList = await dataService.getBookings();
     setBookings(bList);
@@ -68,8 +77,16 @@ export default function PartnerHubView() {
       return;
     }
 
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
     setIsRegistering(true);
     try {
+      const opId = user.id;
+      const opName = profile?.operator_name || profile?.full_name || "Commercial Fleet Partner";
+
       await dataService.registerVehicle({
         operator_id: opId,
         operator_name: opName,
@@ -492,6 +509,8 @@ export default function PartnerHubView() {
           }}
         />
       )}
+
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </div>
   );
 }

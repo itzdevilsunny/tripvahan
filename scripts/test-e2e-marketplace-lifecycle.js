@@ -257,14 +257,46 @@ async function runE2EMarketplaceLifecycle() {
     });
 
     // -------------------------------------------------------------------------
-    // STEP 2: Traveller Trip Creation
+    // STEP 2: Traveller Trip Creation (Stages 1, 2, 3, 4)
     // -------------------------------------------------------------------------
-    await runStep("2. Traveller creates group outstation trip request", async () => {
+    await runStep("1. Unauthenticated trip creation is rejected (401)", async () => {
+      const res = await fetch(`${BASE_URL}/api/trips`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          origin: "Connaught Place, New Delhi",
+          destination: "Amer Fort, Jaipur",
+          start_date: "2026-11-20",
+          travellers_count: 10,
+        }),
+      });
+      assert.strictEqual(res.status, 401, `Expected 401 Unauthorized, got ${res.status}`);
+    });
+
+    await runStep("2. A traveller cannot create a trip under another user's identity (403)", async () => {
       const res = await fetch(`${BASE_URL}/api/trips`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(aliceToken ? { Authorization: `Bearer ${aliceToken}` } : {}),
+          Authorization: `Bearer ${aliceToken}`,
+        },
+        body: JSON.stringify({
+          traveler_id: travellerEve, // Alice attempting to forge trip under Eve's identity
+          origin: "Delhi",
+          destination: "Agra",
+          start_date: "2026-11-20",
+          travellers_count: 5,
+        }),
+      });
+      assert.strictEqual(res.status, 403, `Expected 403 Forbidden for cross-identity spoofing, got ${res.status}`);
+    });
+
+    await runStep("3. Authenticated traveller Alice publishes a trip and persisted trip strictly belongs to her", async () => {
+      const res = await fetch(`${BASE_URL}/api/trips`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${aliceToken}`,
         },
         body: JSON.stringify({
           traveler_id: travellerAlice,
@@ -293,9 +325,22 @@ async function runE2EMarketplaceLifecycle() {
       const json = await res.json();
       assert.ok(json.data?.id, "Trip request record must contain generated ID");
       assert.ok(json.data?.trip_code, "Trip request record must contain trip_code");
+      assert.strictEqual(json.data?.traveler_id, travellerAlice, "Persisted trip must strictly belong to authenticated traveller Alice");
 
       createdTripId = json.data.id;
       createdTripCode = json.data.trip_code;
+    });
+
+    await runStep("4. Verified operator Bob discovers open trip request on the platform", async () => {
+      const res = await fetch(`${BASE_URL}/api/trips`, {
+        headers: { Authorization: `Bearer ${bobToken}` },
+      });
+      assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`);
+      const json = await res.json();
+      assert.ok(
+        json.data?.some((t) => t.id === createdTripId),
+        "Verified operator Bob must discover the published trip request"
+      );
     });
 
     // -------------------------------------------------------------------------
@@ -396,6 +441,27 @@ async function runE2EMarketplaceLifecycle() {
       assert.strictEqual(res.status, 403, `Expected 403 Forbidden for unverified operator, got ${res.status}`);
       const json = await res.json();
       assert.ok(json.error?.includes("verification") || json.error?.includes("Forbidden"));
+
+      // 4c. Cross-operator quotation spoofing: Charlie attempting to quote under Bob's operator identity returns 403
+      const spoofQuoteRes = await fetch(`${BASE_URL}/api/quotations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${charlieToken}`,
+        },
+        body: JSON.stringify({
+          trip_request_id: createdTripId,
+          trip_code: createdTripCode,
+          operator_id: operatorBob, // Cross-operator impersonation attempt
+          operator_name: "Bob Express Mobility",
+          vehicle_id: vehicleIdBob,
+          base_vehicle_fuel_rate: 18000,
+          driver_night_allowance: 2000,
+          tolls_state_permit_taxes: 2000,
+          travellers_count: 10,
+        }),
+      });
+      assert.strictEqual(spoofQuoteRes.status, 403, "Cross-operator quotation impersonation must be rejected with 403");
     });
 
     // -------------------------------------------------------------------------
@@ -493,9 +559,25 @@ async function runE2EMarketplaceLifecycle() {
     });
 
     // -------------------------------------------------------------------------
-    // STEP 7: Prevent Duplicate Quotation on Same Vehicle
+    // STEP 7: Traveller Discovers and Compares Quotations
     // -------------------------------------------------------------------------
-    await runStep("7. Duplicate quotation for same vehicle on same trip is rejected (409)", async () => {
+    await runStep("7. Traveller Alice retrieves and compares eligible quotations", async () => {
+      const res = await fetch(`${BASE_URL}/api/quotations?trip_request_id=${createdTripId}`, {
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      });
+      assert.strictEqual(res.status, 200, `Expected 200, got ${res.status}`);
+      const json = await res.json();
+      assert.ok(Array.isArray(json.data), "Quotations response must be an array");
+      assert.ok(
+        json.data.some((q) => q.id === createdQuotationId && q.operator_name === "Bob Express Mobility"),
+        "Alice must receive Bob's itemized quotation for her trip"
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // STEP 7b: Prevent Duplicate Quotation on Same Vehicle
+    // -------------------------------------------------------------------------
+    await runStep("7b. Duplicate quotation for same vehicle on same trip is rejected (409)", async () => {
       const res = await fetch(`${BASE_URL}/api/quotations`, {
         method: "POST",
         headers: {
@@ -669,6 +751,99 @@ async function runE2EMarketplaceLifecycle() {
     });
 
     // -------------------------------------------------------------------------
+    // STEP 10b: Booking Inspection Security & Tenant Isolation (GET /api/bookings)
+    // -------------------------------------------------------------------------
+    await runStep("10b. GET /api/bookings enforces 401 unauthenticated, traveller isolation, operator scoping, admin visibility", async () => {
+      // 1. Unauthenticated query returns 401
+      const unauthGet = await fetch(`${BASE_URL}/api/bookings`);
+      assert.strictEqual(unauthGet.status, 401, "Unauthenticated GET /api/bookings must return 401");
+
+      // 2. Invalid Bearer token returns 401
+      const invalidTokenGet = await fetch(`${BASE_URL}/api/bookings`, {
+        headers: { Authorization: "Bearer invalid_token_xyz" },
+      });
+      assert.strictEqual(invalidTokenGet.status, 401, "Invalid Bearer token must return 401");
+
+      // 3. Traveller Alice retrieves her own confirmed booking
+      const aliceGet = await fetch(`${BASE_URL}/api/bookings`, {
+        headers: { Authorization: `Bearer ${aliceToken}` },
+      });
+      assert.strictEqual(aliceGet.status, 200, "Alice must receive 200");
+      const aliceData = await aliceGet.json();
+      assert.ok(aliceData.data?.some((b) => b.id === createdBookingId), "Alice must see her booking");
+
+      // 4. Competitor Eve attempts to retrieve Alice's booking via spoofed query parameter
+      const eveGet = await fetch(`${BASE_URL}/api/bookings?traveler_id=${encodeURIComponent(travellerAlice)}`, {
+        headers: { Authorization: `Bearer ${eveToken}` },
+      });
+      assert.strictEqual(eveGet.status, 200, "Eve must receive 200");
+      const eveData = await eveGet.json();
+      assert.strictEqual(
+        eveData.data?.some((b) => b.id === createdBookingId),
+        false,
+        "Eve must NOT see Alice's booking even with traveler_id query param spoofing"
+      );
+
+      // 5. Operator Bob retrieves bookings assigned to his fleet
+      const bobGet = await fetch(`${BASE_URL}/api/bookings`, {
+        headers: { Authorization: `Bearer ${bobToken}` },
+      });
+      assert.strictEqual(bobGet.status, 200, "Bob must receive 200");
+      const bobData = await bobGet.json();
+      assert.ok(bobData.data?.some((b) => b.id === createdBookingId), "Bob must see the booking assigned to his fleet");
+
+      // 6. Admin Dave retrieves all bookings
+      const adminGet = await fetch(`${BASE_URL}/api/bookings`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.strictEqual(adminGet.status, 200, "Admin must receive 200");
+      const adminData = await adminGet.json();
+      assert.ok(adminData.data?.some((b) => b.id === createdBookingId), "Admin must see platform bookings");
+    });
+
+    // -------------------------------------------------------------------------
+    // STEP 10c: Authorized Booking Cancellation (Stage 14)
+    // -------------------------------------------------------------------------
+    await runStep("10c. Authorized traveller Alice cancels her booking cleanly", async () => {
+      const res = await fetch(`${BASE_URL}/api/bookings`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${aliceToken}`,
+        },
+        body: JSON.stringify({
+          id: createdBookingId,
+          journey_status: "Cancelled",
+        }),
+      });
+
+      assert.strictEqual(res.status, 200, `Expected 200 for authorized cancellation, got ${res.status}`);
+      const json = await res.json();
+      assert.strictEqual(json.data?.journey_status, "Cancelled");
+    });
+
+    // -------------------------------------------------------------------------
+    // STEP 10d: Terminal State Immutability: Reopening Cancelled Booking Rejected (Stage 15)
+    // -------------------------------------------------------------------------
+    await runStep("10d. Cancelled booking is immutable and cannot be reopened (409 Conflict)", async () => {
+      const res = await fetch(`${BASE_URL}/api/bookings`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${bobToken}`,
+        },
+        body: JSON.stringify({
+          id: createdBookingId,
+          journey_status: "Confirmed",
+        }),
+      });
+
+      assert.strictEqual(res.status, 409, `Expected 409 Conflict on reopening cancelled booking, got ${res.status}`);
+      const json = await res.json();
+      assert.ok(json.error?.includes("Cancelled") || json.error?.includes("cancelled") || json.error?.includes("Conflict"));
+    });
+
+    // -------------------------------------------------------------------------
     // STEP 11: Admin Verification Portal Inspection Check (Authenticated)
     // -------------------------------------------------------------------------
     await runStep("11. Admin Operators API lists operators and verified audit entries", async () => {
@@ -685,9 +860,13 @@ async function runE2EMarketplaceLifecycle() {
     });
   } finally {
     // -------------------------------------------------------------------------
-    // CLEANUP DISPOSABLE FIXTURES & AUTH USERS
+    // STEP 12: Comprehensive Cleanup of Disposable Fixtures & Auth Users (Stage 16)
     // -------------------------------------------------------------------------
     try {
+      if (createdBookingId) await adminClient.from("bookings").delete().eq("id", createdBookingId);
+      if (createdQuotationId) await adminClient.from("quotations").delete().eq("id", createdQuotationId);
+      if (createdTripId) await adminClient.from("trip_requests").delete().eq("id", createdTripId);
+      if (vehicleIdBob) await adminClient.from("vehicles").delete().eq("id", vehicleIdBob);
       await adminClient.from("bookings").delete().like("id", `%${runId}%`);
       await adminClient.from("quotations").delete().like("id", `%${runId}%`);
       await adminClient.from("trip_requests").delete().like("id", `%${runId}%`);

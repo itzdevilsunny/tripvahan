@@ -18,6 +18,7 @@ import confetti from "canvas-confetti";
 import { Booking, Quotation } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
 import { useAuth } from "@/lib/authContext";
+import AuthModal from "@/components/common/AuthModal";
 
 interface BookingModalProps {
   quotation: Quotation | null;
@@ -31,6 +32,7 @@ export default function BookingModal({
   onBookingConfirmed,
 }: BookingModalProps) {
   const { user, profile } = useAuth();
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [contractSigned, setContractSigned] = useState(true);
   const [isConfirming, setIsConfirming] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -40,9 +42,15 @@ export default function BookingModal({
 
   const handleConfirm = async () => {
     setErrorMsg(null);
+
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
     setIsConfirming(true);
     try {
-      const travelerId = user?.id || "usr_guest_" + Date.now();
+      const travelerId = user.id;
       const travelerName = profile?.full_name || user?.email?.split("@")[0] || "Group Traveller";
 
       const bkg = await dataService.confirmBooking({
@@ -293,6 +301,8 @@ export default function BookingModal({
           </div>
         )}
       </div>
+
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
     </div>
   );
 }

@@ -1,20 +1,162 @@
 import { NextResponse } from "next/server";
 import { serverSupabase as supabase } from "@/lib/supabaseServer";
 
+const BOOKING_SAFE_FIELDS = `
+  id,
+  booking_code,
+  trip_request_id,
+  quotation_id,
+  traveler_id,
+  traveler_name,
+  operator_name,
+  vehicle_name,
+  vehicle_reg,
+  circuit_title,
+  duration,
+  total_amount,
+  per_person_amount,
+  escrow_status,
+  journey_status,
+  contract_signed,
+  pickup_date,
+  start_date,
+  return_date,
+  created_at
+`.replace(/\s+/g, " ").trim();
+
 export async function GET(req: Request) {
   try {
+    const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Unauthorized: Valid authentication token required to access bookings" },
+        { status: 401 }
+      );
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized: Invalid or expired authentication session" },
+        { status: 401 }
+      );
+    }
+
+    // Determine caller's authoritative profile and role
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, role, operator_name")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const callerRole = profile?.role || "traveller";
     const { searchParams } = new URL(req.url);
-    const travelerId = searchParams.get("traveler_id");
+    const qStatus = searchParams.get("status") || searchParams.get("journey_status");
+    const qBookingCode = searchParams.get("booking_code");
 
-    let query = supabase.from("bookings").select("*").order("created_at", { ascending: false });
+    // Case 1: Genuine Platform Administrator
+    if (callerRole === "admin") {
+      let query = supabase.from("bookings").select(BOOKING_SAFE_FIELDS).order("created_at", { ascending: false });
 
-    if (travelerId) {
-      query = query.eq("traveler_id", travelerId);
+      const qTravelerId = searchParams.get("traveler_id");
+      const qOperatorId = searchParams.get("operator_id");
+
+      if (qTravelerId) {
+        query = query.eq("traveler_id", qTravelerId);
+      }
+      if (qOperatorId) {
+        const { data: opQuotes } = await supabase
+          .from("quotations")
+          .select("id")
+          .eq("operator_id", qOperatorId);
+        const opQuoteIds = (opQuotes || []).map((q) => q.id);
+        if (opQuoteIds.length > 0) {
+          query = query.in("quotation_id", opQuoteIds);
+        } else {
+          return NextResponse.json({ data: [] });
+        }
+      }
+      if (qStatus) {
+        query = query.eq("journey_status", qStatus);
+      }
+      if (qBookingCode) {
+        query = query.eq("booking_code", qBookingCode);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      return NextResponse.json({ data: data || [] });
+    }
+
+    // Case 2: Commercial Fleet Operator
+    if (callerRole === "operator") {
+      // Find all quotations submitted by this authenticated operator
+      const { data: opQuotes, error: quotesErr } = await supabase
+        .from("quotations")
+        .select("id")
+        .eq("operator_id", user.id);
+
+      if (quotesErr) {
+        return NextResponse.json({ error: quotesErr.message }, { status: 500 });
+      }
+
+      const quoteIds = (opQuotes || []).map((q) => q.id);
+      const operatorName = profile?.operator_name;
+
+      if (quoteIds.length === 0 && !operatorName) {
+        return NextResponse.json({ data: [] });
+      }
+
+      let query = supabase.from("bookings").select(BOOKING_SAFE_FIELDS).order("created_at", { ascending: false });
+
+      if (quoteIds.length > 0 && operatorName) {
+        query = query.or(`quotation_id.in.(${quoteIds.join(",")}),operator_name.eq."${operatorName}"`);
+      } else if (quoteIds.length > 0) {
+        query = query.in("quotation_id", quoteIds);
+      } else if (operatorName) {
+        query = query.eq("operator_name", operatorName);
+      }
+
+      if (qStatus) {
+        query = query.eq("journey_status", qStatus);
+      }
+      if (qBookingCode) {
+        query = query.eq("booking_code", qBookingCode);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+      return NextResponse.json({ data: data || [] });
+    }
+
+    // Case 3: Verified Traveller (Default & Strict Scoping)
+    // Caller may NEVER supply someone else's traveler_id to access their records.
+    let query = supabase
+      .from("bookings")
+      .select(BOOKING_SAFE_FIELDS)
+      .eq("traveler_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (qStatus) {
+      query = query.eq("journey_status", qStatus);
+    }
+    if (qBookingCode) {
+      query = query.eq("booking_code", qBookingCode);
     }
 
     const { data, error } = await query;
     if (error) {
-      return NextResponse.json({ data: [], warning: error.message }, { status: 200 });
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ data: data || [] });

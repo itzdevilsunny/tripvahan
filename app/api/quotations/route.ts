@@ -219,8 +219,8 @@ export async function POST(req: Request) {
 
     if (error) {
       return NextResponse.json(
-        { data: newQuotation, warning: error.message, database_synced: false },
-        { status: 201 }
+        { error: `Database insertion failed: ${error.message}` },
+        { status: 500 }
       );
     }
 

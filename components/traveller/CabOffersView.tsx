@@ -17,6 +17,7 @@ import {
   UserCheck,
   Shield,
   FileCheck,
+  Route,
 } from "lucide-react";
 import { Quotation, TripRequest } from "@/lib/types";
 import { dataService } from "@/lib/dataService";
@@ -25,57 +26,71 @@ import { getVehicleImage } from "@/lib/mediaAssets";
 interface CabOffersViewProps {
   tripRequest?: TripRequest | null;
   onSelectQuotation: (quotation: Quotation) => void;
+  onPlanNewTrip?: () => void;
 }
 
 export default function CabOffersView({
   tripRequest,
   onSelectQuotation,
+  onPlanNewTrip,
 }: CabOffersViewProps) {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [splitFare, setSplitFare] = useState(true);
   const [activeFilter, setActiveFilter] = useState<"all" | "lowest" | "top_rated">("all");
   const [expandedDetailsId, setExpandedDetailsId] = useState<string | null>(null);
   const [likedQuotes, setLikedQuotes] = useState<Record<string, boolean>>({});
 
-  // Default active trip request if none passed
-  const activeTrip: TripRequest = tripRequest || {
-    id: "trp_9042",
-    trip_code: "TRP-9042",
-    traveler_id: "usr_rohan",
-    traveler_name: "Rohan S.",
-    circuit_title: "Delhi → Agra → Jaipur",
-    origin: "Delhi NCR",
-    destination: "Jaipur",
-    stops: ["New Delhi", "Agra Fort", "Jaipur City"],
-    circuit_type: "Multi-day circuit",
-    distance_km: 680,
-    start_date: "Oct 24, 2026",
-    duration: "3D / 2N Golden Triangle Trip",
-    pickup_time: "06:30 AM",
-    pickup_address: "Dwarka Sector 10, New Delhi",
-    travellers_count: 12,
-    adults_count: 10,
-    seniors_count: 2,
-    luggage_bags: 12,
-    matched_vehicle_class: "Executive Minibus / Tempo Traveller",
-    indicative_budget_min: 22000,
-    indicative_budget_max: 26000,
-    target_budget: 24500,
-    amenities: ["Dual AC", "Waterproof Carrier"],
-    status: "bidding",
-    quotes_count: 0,
-  };
-
   useEffect(() => {
     async function loadQuotes() {
+      if (!tripRequest?.id) {
+        setQuotations([]);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
-      const quotes = await dataService.getQuotations(activeTrip.id);
+      const quotes = await dataService.getQuotations(tripRequest.id);
       setQuotations(quotes);
       setLoading(false);
     }
     loadQuotes();
-  }, [activeTrip.id]);
+  }, [tripRequest?.id]);
+
+  // When no active trip request exists, display an honest empty state with planning CTA
+  if (!tripRequest) {
+    return (
+      <div className="max-w-xl mx-auto pb-24 px-3 sm:px-4 space-y-4 pt-4">
+        <div className="space-y-1">
+          <h1 className="text-xl sm:text-2xl font-bold text-[#172B2A] tracking-tight">
+            Cab Offers
+          </h1>
+          <p className="text-xs sm:text-sm text-[#718096]">
+            Compare verified fleet partners and choose the best quotation
+          </p>
+        </div>
+
+        <div className="bg-white rounded-2xl p-8 border border-[#E5EAF0] shadow-xs text-center space-y-3">
+          <div className="w-12 h-12 bg-[#DDF7ED] text-[#075E54] rounded-full flex items-center justify-center mx-auto">
+            <Route className="w-6 h-6 text-[#075E54]" />
+          </div>
+          <h3 className="font-semibold text-[#172B2A] text-sm sm:text-base">No Active Trip Request</h3>
+          <p className="text-xs text-[#718096] max-w-sm mx-auto leading-relaxed">
+            No active trip request. Plan and publish your itinerary to receive competitive fleet offers.
+          </p>
+          {onPlanNewTrip && (
+            <button
+              type="button"
+              onClick={onPlanNewTrip}
+              className="py-2.5 px-4 bg-[#075E54] hover:bg-[#064e46] text-white rounded-xl font-medium text-xs shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <span>Plan and Publish Itinerary</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // Filter quotes: exclude already accepted/booked quotes from available offers
   const availableQuotations = quotations.filter((q) => q.status === "pending" || !q.status);
@@ -87,7 +102,7 @@ export default function CabOffersView({
   });
 
   const lowestFare = quotations.length > 0 ? Math.min(...quotations.map((q) => q.total_quote)) : 0;
-  const hasRatedQuotes = quotations.some((q) => q.operator_rating && q.operator_rating > 0);
+  const paxCount = tripRequest.travellers_count > 0 ? tripRequest.travellers_count : 1;
 
   const toggleLike = (quoteId: string) => {
     setLikedQuotes((prev) => ({ ...prev, [quoteId]: !prev[quoteId] }));
@@ -95,7 +110,7 @@ export default function CabOffersView({
 
   return (
     <div className="max-w-xl mx-auto pb-24 px-3 sm:px-4 space-y-4 pt-2">
-      {/* Page Title & Subtitle matching Column 3 of reference design */}
+      {/* Page Title & Subtitle */}
       <div className="space-y-1">
         <h1 className="text-xl sm:text-2xl font-bold text-[#172B2A] tracking-tight">
           Cab Offers
@@ -109,31 +124,31 @@ export default function CabOffersView({
       <div className="bg-white rounded-2xl p-4 sm:p-5 border border-[#E5EAF0] shadow-xs space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-medium tracking-wider text-[#075E54] bg-[#DDF7ED] px-2.5 py-0.5 rounded-full uppercase">
-            Active Request #{activeTrip.trip_code}
+            Active Request #{tripRequest.trip_code}
           </span>
           <span className="text-xs text-[#718096]">
-            Status: <span className="text-[#075E54] font-semibold uppercase">{activeTrip.status}</span>
+            Status: <span className="text-[#075E54] font-semibold uppercase">{tripRequest.status}</span>
           </span>
         </div>
 
         <div>
           <h2 className="text-base sm:text-lg font-semibold text-[#172B2A] leading-snug">
-            {activeTrip.circuit_title}
+            {tripRequest.circuit_title}
           </h2>
           <p className="text-xs text-[#718096] mt-1">
-            {activeTrip.travellers_count} Travellers ({activeTrip.adults_count} Adults, {activeTrip.seniors_count} Seniors) · {activeTrip.luggage_bags} Bags · {activeTrip.matched_vehicle_class}
+            {tripRequest.travellers_count} Travellers ({tripRequest.adults_count || 0} Adults, {tripRequest.seniors_count || 0} Seniors) · {tripRequest.luggage_bags || 0} Bags · {tripRequest.matched_vehicle_class}
           </p>
         </div>
 
         <div className="flex items-center justify-between text-xs pt-2 border-t border-[#E5EAF0]">
           <span className="text-[#718096]">Target Budget</span>
           <span className="font-bold text-[#075E54] text-base">
-            ₹{activeTrip.target_budget.toLocaleString("en-IN")}
+            ₹{tripRequest.target_budget.toLocaleString("en-IN")}
           </span>
         </div>
       </div>
 
-      {/* Filter Tabs matching Column 3 mockup: [All Offers] [Lowest Fare] [★ Top Rated] */}
+      {/* Filter Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-0.5 text-xs">
         <button
           type="button"
@@ -161,28 +176,33 @@ export default function CabOffersView({
           </button>
         )}
 
-        {hasRatedQuotes && (
-          <button
-            type="button"
-            onClick={() => setActiveFilter("top_rated")}
-            className={`px-3.5 py-1.5 rounded-full font-medium transition-all shrink-0 flex items-center gap-1 cursor-pointer ${
-              activeFilter === "top_rated"
-                ? "bg-[#075E54] text-white shadow-xs font-semibold"
-                : "bg-white text-[#718096] border border-[#E5EAF0] hover:border-slate-300 hover:text-[#172B2A]"
-            }`}
-          >
-            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-            <span>Top Rated</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setActiveFilter("top_rated")}
+          className={`px-3.5 py-1.5 rounded-full font-medium transition-all shrink-0 cursor-pointer ${
+            activeFilter === "top_rated"
+              ? "bg-[#075E54] text-white shadow-xs font-semibold"
+              : "bg-white text-[#718096] border border-[#E5EAF0] hover:border-slate-300 hover:text-[#172B2A]"
+          }`}
+        >
+          ★ Top Rated
+        </button>
+      </div>
 
-        {/* Split fare toggle switch */}
-        <div className="ml-auto flex items-center gap-1.5 pl-2 shrink-0">
-          <span className="text-[11px] text-[#718096]">Per-pax</span>
+      {/* Split Fare Toggle Bar */}
+      <div className="bg-white rounded-xl p-3 border border-[#E5EAF0] shadow-xs flex items-center justify-between text-xs">
+        <div className="flex items-center gap-2 text-[#172B2A]">
+          <CreditCard className="w-4 h-4 text-[#075E54]" />
+          <span className="font-medium">Show pricing per passenger ({paxCount} travellers)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-[#718096]">{splitFare ? "On" : "Off"}</span>
           <button
             type="button"
+            role="switch"
+            aria-checked={splitFare}
             onClick={() => setSplitFare(!splitFare)}
-            className={`w-9 h-5 flex items-center rounded-full p-0.5 cursor-pointer transition-colors ${
+            className={`w-9 h-5 rounded-full transition-colors p-0.5 cursor-pointer ${
               splitFare ? "bg-[#075E54]" : "bg-slate-300"
             }`}
           >
@@ -210,19 +230,14 @@ export default function CabOffersView({
             Waiting for Operator Quotations
           </h3>
           <p className="text-xs text-[#718096] max-w-sm mx-auto leading-relaxed">
-            Your trip request #{activeTrip.trip_code} is active. Commercial fleet partners along the route are preparing verified all-inclusive quotes.
+            Your trip request #{tripRequest.trip_code} is active. Commercial fleet partners along the route are preparing verified all-inclusive quotes.
           </p>
-          <div className="pt-2">
-            <span className="text-[11px] font-medium text-[#075E54] bg-[#DDF7ED] px-3 py-1.5 rounded-full inline-block">
-              Switch to Fleet Partner mode above to submit quotation
-            </span>
-          </div>
         </div>
       ) : (
         <div className="space-y-4">
           {filteredQuotations.map((quote) => {
             const isExpanded = expandedDetailsId === quote.id;
-            const perPerson = Math.round(quote.total_quote / activeTrip.travellers_count);
+            const perPerson = Math.round(quote.total_quote / paxCount);
             const isLiked = !!likedQuotes[quote.id];
             const vehicleImg = getVehicleImage(undefined, quote.vehicle_name);
 
@@ -231,7 +246,7 @@ export default function CabOffersView({
                 key={quote.id}
                 className="bg-white rounded-2xl border border-[#E5EAF0] shadow-xs overflow-hidden transition-all hover:border-[#075E54]/40"
               >
-                {/* Vehicle Image Header with Badges matching Column 3 */}
+                {/* Vehicle Image Header with Badges */}
                 <div className="relative h-44 sm:h-52 w-full overflow-hidden bg-slate-100">
                   <Image
                     src={vehicleImg}
@@ -240,7 +255,6 @@ export default function CabOffersView({
                     className="object-cover transition-transform duration-300 hover:scale-105"
                     sizes="(max-width: 768px) 100vw, 600px"
                   />
-                  {/* Subtle dark gradient overlay on bottom for readability */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20 pointer-events-none" />
 
                   {/* Top-left: Verified Fleet Partner Badge */}
@@ -277,7 +291,6 @@ export default function CabOffersView({
 
                 {/* Card Content Body */}
                 <div className="p-4 sm:p-5 space-y-3.5">
-                  {/* Operator Name & Vehicle Specs */}
                   <div>
                     <h3 className="font-bold text-[#172B2A] text-base sm:text-lg leading-snug">
                       {quote.operator_name}
@@ -290,7 +303,7 @@ export default function CabOffersView({
                     </p>
                   </div>
 
-                  {/* Feature Tags Row matching Column 3 */}
+                  {/* Feature Tags Row */}
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#F7F8FA] border border-[#E5EAF0] text-[#172B2A] text-xs font-medium">
                       <Wind className="w-3.5 h-3.5 text-[#075E54]" />
@@ -306,7 +319,7 @@ export default function CabOffersView({
                     </span>
                   </div>
 
-                  {/* Highlights / Inclusions */}
+                  {/* Inclusions */}
                   <div className="bg-[#F7F8FA] p-3 rounded-xl border border-[#E5EAF0] text-xs text-[#172B2A] space-y-1.5">
                     <div className="flex items-center gap-2 font-medium text-[#075E54]">
                       <Check className="w-3.5 h-3.5 text-[#075E54] shrink-0" />
@@ -320,7 +333,7 @@ export default function CabOffersView({
                     )}
                   </div>
 
-                  {/* Operator Message Note if any */}
+                  {/* Operator Note */}
                   {quote.operator_note && (
                     <div className="bg-[#DDF7ED]/40 p-3 rounded-xl border border-[#075E54]/20 flex items-start gap-2 text-xs text-[#172B2A]">
                       <MessageSquare className="w-3.5 h-3.5 text-[#075E54] shrink-0 mt-0.5" />
@@ -330,7 +343,7 @@ export default function CabOffersView({
                     </div>
                   )}
 
-                  {/* Price Breakdown Details Toggle */}
+                  {/* Price Breakdown Toggle */}
                   <div>
                     <button
                       type="button"
@@ -370,7 +383,7 @@ export default function CabOffersView({
                     )}
                   </div>
 
-                  {/* Bottom Split Row: Price on Left, View Details CTA on Right matching Column 3 */}
+                  {/* Bottom Row: Price & Action */}
                   <div className="pt-2 border-t border-[#E5EAF0] flex items-center justify-between gap-3">
                     <div>
                       <div className="text-xl sm:text-2xl font-bold text-[#075E54]">
@@ -397,7 +410,7 @@ export default function CabOffersView({
         </div>
       )}
 
-      {/* Dynamic Honest Comparison Matrix (Only when 2+ quotes exist) */}
+      {/* Dynamic Comparison Matrix (Only when 2+ quotes exist) */}
       {filteredQuotations.length > 1 && (
         <div className="bg-white rounded-2xl p-4 sm:p-5 border border-[#E5EAF0] shadow-xs space-y-3">
           <div className="flex items-center justify-between">
@@ -437,7 +450,7 @@ export default function CabOffersView({
                   <td className="py-2.5 text-[#718096]">Per Person</td>
                   {filteredQuotations.map((q) => (
                     <td key={q.id} className="py-2.5 font-semibold text-[#075E54]">
-                      ₹{Math.round(q.total_quote / activeTrip.travellers_count).toLocaleString("en-IN")}
+                      ₹{Math.round(q.total_quote / paxCount).toLocaleString("en-IN")}
                     </td>
                   ))}
                 </tr>
@@ -470,4 +483,3 @@ export default function CabOffersView({
     </div>
   );
 }
-

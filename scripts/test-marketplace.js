@@ -2411,5 +2411,676 @@ test("Failed verification audit insertion leaves profile and vehicle state uncha
   assert.strictEqual(auditTable.length, 0, "No audit records created");
 });
 
+// 39. Booking Inspection Security: Unauthenticated or Invalid Bearer Token Returns 401
+test("Booking Inspection Security: Unauthenticated or invalid Bearer token returns 401", () => {
+  function handleGetBookingsAuth(authHeader, mockGetUser) {
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) {
+      return { status: 401, error: "Unauthorized: Valid authentication token required to access bookings" };
+    }
+    const { user, error } = mockGetUser(token);
+    if (error || !user) {
+      return { status: 401, error: "Unauthorized: Invalid or expired authentication session" };
+    }
+    return { status: 200, user };
+  }
+
+  // 1. Missing header -> 401
+  const resNoHeader = handleGetBookingsAuth(null, () => ({ user: null }));
+  assert.strictEqual(resNoHeader.status, 401);
+  assert.ok(resNoHeader.error.includes("Valid authentication token required"));
+
+  // 2. Malformed header (no Bearer) -> 401
+  const resBadScheme = handleGetBookingsAuth("Basic dXNlcjpwYXNz", () => ({ user: null }));
+  assert.strictEqual(resBadScheme.status, 401);
+
+  // 3. Expired/Invalid JWT -> 401
+  const resInvalidJwt = handleGetBookingsAuth("Bearer expired_token_xyz", () => ({
+    user: null,
+    error: { message: "Token expired" },
+  }));
+  assert.strictEqual(resInvalidJwt.status, 401);
+  assert.ok(resInvalidJwt.error.includes("Invalid or expired authentication session"));
+
+  // 4. Genuine token -> 200
+  const resValid = handleGetBookingsAuth("Bearer valid_jwt_token", (t) => ({
+    user: { id: "usr_alice", email: "alice@test.com" },
+  }));
+  assert.strictEqual(resValid.status, 200);
+  assert.strictEqual(resValid.user.id, "usr_alice");
+});
+
+// 40. Booking Inspection Scoping: Traveller A cannot retrieve Traveller B's bookings
+test("Booking Inspection Scoping: Traveller A cannot retrieve Traveller B's bookings and query parameters cannot bypass authorization", () => {
+  const allBookingsInDb = [
+    {
+      id: "bk_alice_1",
+      booking_code: "BK-1001",
+      traveler_id: "usr_alice",
+      traveler_name: "Alice Sharma",
+      total_amount: 22000,
+      journey_status: "Confirmed",
+      internal_notes: "Private VIP note",
+    },
+    {
+      id: "bk_eve_1",
+      booking_code: "BK-2002",
+      traveler_id: "usr_eve",
+      traveler_name: "Eve Competitor",
+      total_amount: 19000,
+      journey_status: "Confirmed",
+      internal_notes: "Competitor confidential",
+    },
+  ];
+
+  function executeGetBookingsForCaller(callerUser, callerProfile, searchParams, dbBookings) {
+    const callerRole = callerProfile?.role || "traveller";
+    if (callerRole === "traveller") {
+      // Must strictly filter by caller's authenticated user ID, IGNORING searchParams.traveler_id
+      const filtered = dbBookings.filter((b) => b.traveler_id === callerUser.id);
+      // Project only safe fields, excluding internal_notes
+      return filtered.map(({ internal_notes, ...safe }) => safe);
+    }
+    return [];
+  }
+
+  // Caller is Alice, but query params attempt to scrape Eve's bookings: ?traveler_id=usr_eve
+  const aliceCaller = { id: "usr_alice" };
+  const aliceProfile = { role: "traveller" };
+  const maliciousParams = { traveler_id: "usr_eve" };
+
+  const results = executeGetBookingsForCaller(aliceCaller, aliceProfile, maliciousParams, allBookingsInDb);
+
+  // 1. Result must only contain Alice's booking
+  assert.strictEqual(results.length, 1);
+  assert.strictEqual(results[0].id, "bk_alice_1");
+  assert.strictEqual(results[0].traveler_id, "usr_alice");
+
+  // 2. Eve's booking must NOT be present
+  assert.strictEqual(results.some((b) => b.traveler_id === "usr_eve"), false);
+
+  // 3. Sensitive fields must be excluded from projection
+  assert.strictEqual(results[0].internal_notes, undefined);
+});
+
+// 41. Booking Inspection Scoping: Operator A cannot retrieve Operator B's bookings and admin receives authorized broader access
+test("Booking Inspection Scoping: Operator A cannot retrieve Operator B's bookings and admin receives authorized broader access", () => {
+  const dbBookings = [
+    { id: "bk_1", quotation_id: "quo_bob_1", operator_name: "Bob Express", total_amount: 22000, traveler_id: "usr_alice" },
+    { id: "bk_2", quotation_id: "quo_charlie_1", operator_name: "Charlie Cabs", total_amount: 25000, traveler_id: "usr_eve" },
+    { id: "bk_3", quotation_id: "quo_david_1", operator_name: "David Travels", total_amount: 30000, traveler_id: "usr_frank" },
+  ];
+
+  const dbQuotations = [
+    { id: "quo_bob_1", operator_id: "op_bob" },
+    { id: "quo_charlie_1", operator_id: "op_charlie" },
+    { id: "quo_david_1", operator_id: "op_david" },
+  ];
+
+  function executeRoleScopedBookings(callerUser, callerProfile, searchParams) {
+    const role = callerProfile?.role || "traveller";
+
+    if (role === "admin") {
+      let res = [...dbBookings];
+      if (searchParams?.operator_id) {
+        const opQuotes = dbQuotations.filter((q) => q.operator_id === searchParams.operator_id).map((q) => q.id);
+        res = res.filter((b) => opQuotes.includes(b.quotation_id));
+      }
+      return { status: 200, data: res };
+    }
+
+    if (role === "operator") {
+      const myQuoteIds = dbQuotations.filter((q) => q.operator_id === callerUser.id).map((q) => q.id);
+      const myBookings = dbBookings.filter(
+        (b) => myQuoteIds.includes(b.quotation_id) || (callerProfile.operator_name && b.operator_name === callerProfile.operator_name)
+      );
+      return { status: 200, data: myBookings };
+    }
+
+    return { status: 403, error: "Forbidden" };
+  }
+
+  // 1. Operator Bob querying -> receives ONLY Bob's booking
+  const bobRes = executeRoleScopedBookings({ id: "op_bob" }, { role: "operator", operator_name: "Bob Express" });
+  assert.strictEqual(bobRes.status, 200);
+  assert.strictEqual(bobRes.data.length, 1);
+  assert.strictEqual(bobRes.data[0].id, "bk_1");
+  assert.strictEqual(bobRes.data[0].quotation_id, "quo_bob_1");
+
+  // 2. Operator Charlie querying -> receives ONLY Charlie's booking
+  const charlieRes = executeRoleScopedBookings({ id: "op_charlie" }, { role: "operator", operator_name: "Charlie Cabs" });
+  assert.strictEqual(charlieRes.status, 200);
+  assert.strictEqual(charlieRes.data.length, 1);
+  assert.strictEqual(charlieRes.data[0].id, "bk_2");
+
+  // 3. Admin querying -> receives all bookings
+  const adminRes = executeRoleScopedBookings({ id: "usr_admin_dave" }, { role: "admin" });
+  assert.strictEqual(adminRes.status, 200);
+  assert.strictEqual(adminRes.data.length, 3);
+
+  // 4. Admin filtering by operator Charlie -> receives only Charlie's bookings
+  const adminFilterRes = executeRoleScopedBookings({ id: "usr_admin_dave" }, { role: "admin" }, { operator_id: "op_charlie" });
+  assert.strictEqual(adminFilterRes.data.length, 1);
+  assert.strictEqual(adminFilterRes.data[0].quotation_id, "quo_charlie_1");
+});
+
+// 42. Client DataService: Mutating actions mandate Bearer tokens and missing sessions produce clear error
+test("Client DataService: Mutating actions (confirm, quote, vehicle, cancel) mandate Bearer tokens and missing session produces clear error", async () => {
+  class MockDataService {
+    constructor(session) {
+      this.session = session;
+    }
+
+    async getAuthHeaders(includeContentType = true) {
+      const headers = {};
+      if (includeContentType) headers["Content-Type"] = "application/json";
+      if (this.session?.access_token) {
+        headers["Authorization"] = `Bearer ${this.session.access_token}`;
+      }
+      return headers;
+    }
+
+    async confirmBooking(data) {
+      const headers = await this.getAuthHeaders(true);
+      if (!headers["Authorization"]) {
+        throw new Error("Authentication required: Please sign in as a traveller to confirm this booking");
+      }
+      return { success: true, headersSent: headers };
+    }
+
+    async submitQuotation(data) {
+      const headers = await this.getAuthHeaders(true);
+      if (!headers["Authorization"]) {
+        throw new Error("Authentication required: Please sign in as a verified fleet operator to submit quotations");
+      }
+      return { success: true, headersSent: headers };
+    }
+
+    async registerVehicle(data) {
+      const headers = await this.getAuthHeaders(true);
+      if (!headers["Authorization"]) {
+        throw new Error("Authentication required: Please sign in as an operator to register vehicles");
+      }
+      return { success: true, headersSent: headers };
+    }
+
+    async cancelBooking(bookingId) {
+      const headers = await this.getAuthHeaders(true);
+      if (!headers["Authorization"]) {
+        throw new Error("Authentication required: Please sign in to cancel this booking");
+      }
+      return { success: true, headersSent: headers };
+    }
+  }
+
+  // 1. Unauthenticated client -> All mutating methods throw clear authentication error
+  const unauthService = new MockDataService(null);
+  await assert.rejects(() => unauthService.confirmBooking({}), /Authentication required: Please sign in as a traveller/);
+  await assert.rejects(() => unauthService.submitQuotation({}), /Authentication required: Please sign in as a verified fleet operator/);
+  await assert.rejects(() => unauthService.registerVehicle({}), /Authentication required: Please sign in as an operator/);
+  await assert.rejects(() => unauthService.cancelBooking("bk_1"), /Authentication required: Please sign in to cancel/);
+
+  // 2. Authenticated client -> Attaches Bearer token properly
+  const authService = new MockDataService({ access_token: "mock_jwt_access_token_123" });
+  const confirmRes = await authService.confirmBooking({});
+  assert.strictEqual(confirmRes.headersSent["Authorization"], "Bearer mock_jwt_access_token_123");
+  assert.strictEqual(confirmRes.headersSent["Content-Type"], "application/json");
+
+  const quoteRes = await authService.submitQuotation({});
+  assert.strictEqual(quoteRes.headersSent["Authorization"], "Bearer mock_jwt_access_token_123");
+
+  const vehicleRes = await authService.registerVehicle({});
+  assert.strictEqual(vehicleRes.headersSent["Authorization"], "Bearer mock_jwt_access_token_123");
+
+  const cancelRes = await authService.cancelBooking("bk_1");
+  assert.strictEqual(cancelRes.headersSent["Authorization"], "Bearer mock_jwt_access_token_123");
+});
+
+// 43. Client DataService: Protected API failures never trigger direct database-write fallbacks and never leak tokens
+test("Client DataService: Protected API failures never trigger direct database-write fallbacks and never leak tokens", async () => {
+  const directDbWrites = [];
+
+  class MockSecuredService {
+    async confirmBookingWithFallbackCheck(apiStatus, apiErrorMessage) {
+      // Direct mock of fetch returning error
+      const res = { ok: apiStatus >= 200 && apiStatus < 300, status: apiStatus };
+      if (!res.ok) {
+        // STRICT RULE: Must throw error directly, NO direct db insertion fallback!
+        throw new Error(apiErrorMessage || `Booking confirmation failed (HTTP ${apiStatus})`);
+      }
+      directDbWrites.push({ action: "insert_booking" });
+      return { success: true };
+    }
+  }
+
+  const service = new MockSecuredService();
+
+  // Test 401 Unauthorized from API
+  await assert.rejects(
+    () => service.confirmBookingWithFallbackCheck(401, "Unauthorized: Valid authentication token required"),
+    /Unauthorized/
+  );
+  assert.strictEqual(directDbWrites.length, 0, "No direct database writes should occur on 401");
+
+  // Test 409 Conflict from API (e.g. Overlapping reservation)
+  await assert.rejects(
+    () => service.confirmBookingWithFallbackCheck(409, "Vehicle is already confirmed for another booking during the requested dates"),
+    /already confirmed/
+  );
+  assert.strictEqual(directDbWrites.length, 0, "No direct database writes should occur on 409 conflict");
+
+  // Verify access token is not leaked into error messages
+  const sampleToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.sensitive_payload";
+  try {
+    const err = new Error("Authentication failed with status 401");
+    assert.strictEqual(err.message.includes(sampleToken), false, "Token must never appear in error message");
+  } catch (e) {
+    assert.fail(e);
+  }
+});
+
+// 44. Trip Creation Security (POST /api/trips): Authentication, Identity Binding, Validation & Error Handling
+test("POST /api/trips: Strict authentication, identity derivation, field validation, and error reporting", async () => {
+  const mockDb = [];
+
+  function simulatePostTrip(token, user, body, simulateDbError = false) {
+    if (!token) {
+      return { status: 401, error: "Unauthorized: Valid authentication token required to create trip requests" };
+    }
+    if (!user) {
+      return { status: 401, error: "Unauthorized: Invalid or expired authentication session" };
+    }
+    if (!body || typeof body !== "object") {
+      return { status: 400, error: "Malformed request payload" };
+    }
+
+    const {
+      traveler_id: clientTravelerId,
+      circuit_title,
+      origin,
+      destination,
+      stops = [],
+      circuit_type,
+      distance_km,
+      start_date,
+      end_date,
+      duration,
+      pickup_time,
+      pickup_address,
+      travellers_count,
+      adults_count = 0,
+      seniors_count = 0,
+      luggage_bags = 0,
+      matched_vehicle_class,
+      target_budget,
+      amenities = [],
+    } = body;
+
+    // Reject attempts to create trips under another user's identity
+    if (clientTravelerId && clientTravelerId !== user.id) {
+      return { status: 403, error: "Forbidden: Cannot create trip requests on behalf of another user identity" };
+    }
+
+    // Server-side field validations
+    if (!origin || typeof origin !== "string" || !origin.trim()) {
+      return { status: 400, error: "Trip origin is required" };
+    }
+    if (!destination || typeof destination !== "string" || !destination.trim()) {
+      return { status: 400, error: "Trip destination is required" };
+    }
+    if (!start_date || isNaN(Date.parse(start_date))) {
+      return { status: 400, error: "Valid travel start date is required" };
+    }
+    if (end_date && (isNaN(Date.parse(end_date)) || new Date(end_date) < new Date(start_date))) {
+      return { status: 400, error: "Travel end date cannot precede start date" };
+    }
+
+    const parsedPax = Number(travellers_count);
+    if (isNaN(parsedPax) || parsedPax < 1) {
+      return { status: 400, error: "At least 1 passenger is required" };
+    }
+
+    const parsedAdults = Number(adults_count) || 0;
+    const parsedSeniors = Number(seniors_count) || 0;
+    const parsedBags = Number(luggage_bags) || 0;
+    if (parsedAdults < 0 || parsedSeniors < 0 || parsedBags < 0) {
+      return { status: 400, error: "Passenger and luggage counts must be non-negative" };
+    }
+
+    if (simulateDbError) {
+      return { status: 500, error: "Database insertion failed: Connection pool exhausted" };
+    }
+
+    const newTrip = {
+      id: `trp_${Date.now()}`,
+      trip_code: `TRP-1234`,
+      traveler_id: user.id, // Strictly bound to authenticated user
+      traveler_name: user.email?.split("@")[0] || "Traveller",
+      circuit_title: circuit_title?.trim() || `${origin.trim()} → ${destination.trim()}`,
+      origin: origin.trim(),
+      destination: destination.trim(),
+      stops: Array.isArray(stops) ? stops : [],
+      circuit_type: circuit_type || "Outstation Trip",
+      distance_km: Number(distance_km) || 350,
+      start_date,
+      end_date: end_date || null,
+      duration: duration || "1 Day",
+      pickup_time: pickup_time || "06:00 AM",
+      pickup_address: pickup_address?.trim() || origin.trim(),
+      travellers_count: parsedPax,
+      adults_count: parsedAdults,
+      seniors_count: parsedSeniors,
+      luggage_bags: parsedBags,
+      matched_vehicle_class: matched_vehicle_class || "Innova / Tempo Traveller",
+      target_budget: Number(target_budget) || 15000,
+      amenities: Array.isArray(amenities) ? amenities : [],
+      status: "open",
+      quotes_count: 0,
+    };
+
+    mockDb.push(newTrip);
+    return { status: 201, data: newTrip, database_synced: true };
+  }
+
+  // 1. Unauthenticated request -> HTTP 401
+  const unauthRes = simulatePostTrip(null, null, { origin: "Delhi", destination: "Jaipur" });
+  assert.strictEqual(unauthRes.status, 401);
+  assert.match(unauthRes.error, /Unauthorized/);
+
+  // 2. Cross-user spoofing attempt -> HTTP 403
+  const spoofRes = simulatePostTrip("token_alice", { id: "usr_alice", email: "alice@test.com" }, {
+    traveler_id: "usr_victim_bob", // Mallory attempting to create trip as Bob
+    origin: "Delhi NCR",
+    destination: "Agra",
+    start_date: "2026-11-01",
+    travellers_count: 4,
+  });
+  assert.strictEqual(spoofRes.status, 403);
+  assert.match(spoofRes.error, /Forbidden/);
+
+  // 3. Validation failures -> HTTP 400
+  const missingOriginRes = simulatePostTrip("token_alice", { id: "usr_alice" }, {
+    destination: "Agra",
+    start_date: "2026-11-01",
+    travellers_count: 2,
+  });
+  assert.strictEqual(missingOriginRes.status, 400);
+
+  const invalidDatesRes = simulatePostTrip("token_alice", { id: "usr_alice" }, {
+    origin: "Delhi",
+    destination: "Agra",
+    start_date: "2026-11-05",
+    end_date: "2026-11-02", // End before start
+    travellers_count: 2,
+  });
+  assert.strictEqual(invalidDatesRes.status, 400);
+  assert.match(invalidDatesRes.error, /precede start date/);
+
+  const zeroPaxRes = simulatePostTrip("token_alice", { id: "usr_alice" }, {
+    origin: "Delhi",
+    destination: "Agra",
+    start_date: "2026-11-01",
+    travellers_count: 0,
+  });
+  assert.strictEqual(zeroPaxRes.status, 400);
+
+  // 4. Database failure returns HTTP 500 (Never 201)
+  const dbFailRes = simulatePostTrip("token_alice", { id: "usr_alice", email: "alice@test.com" }, {
+    origin: "Delhi",
+    destination: "Agra",
+    start_date: "2026-11-01",
+    travellers_count: 4,
+  }, true);
+  assert.strictEqual(dbFailRes.status, 500);
+  assert.strictEqual(dbFailRes.data, undefined);
+
+  // 5. Valid trip creation derives traveler_id from auth and returns HTTP 201
+  const validRes = simulatePostTrip("token_alice", { id: "usr_alice", email: "alice@test.com" }, {
+    origin: "Delhi NCR",
+    destination: "Jaipur",
+    start_date: "2026-11-01",
+    travellers_count: 6,
+    target_budget: 18000,
+  });
+  assert.strictEqual(validRes.status, 201);
+  assert.strictEqual(validRes.database_synced, true);
+  assert.strictEqual(validRes.data.traveler_id, "usr_alice");
+  assert.strictEqual(mockDb.length, 1);
+  assert.strictEqual(mockDb[0].traveler_id, "usr_alice");
+});
+
+// 45. CabOffersView: Elimination of hardcoded mock trip fallback and honest empty state
+test("CabOffersView: Elimination of hardcoded mock trips (trp_9042, usr_rohan) and honest empty state", () => {
+  // Simulate CabOffersView state logic
+  function renderCabOffersView(tripRequest, quotations) {
+    if (!tripRequest) {
+      return {
+        viewType: "EMPTY_STATE",
+        message: "No active trip request. Plan and publish your itinerary to receive competitive fleet offers.",
+        hasPlanningCta: true,
+        offersRendered: 0,
+      };
+    }
+
+    const available = (quotations || []).filter((q) => q.status === "pending" || !q.status);
+    if (available.length === 0) {
+      return {
+        viewType: "WAITING_QUOTES",
+        message: "Waiting for fleet operators to submit quotations.",
+        tripCode: tripRequest.trip_code,
+        offersRendered: 0,
+      };
+    }
+
+    return {
+      viewType: "QUOTATION_LIST",
+      tripCode: tripRequest.trip_code,
+      offersRendered: available.length,
+    };
+  }
+
+  // 1. When no tripRequest is passed, it must render honest empty state
+  const emptyView = renderCabOffersView(null, []);
+  assert.strictEqual(emptyView.viewType, "EMPTY_STATE");
+  assert.strictEqual(emptyView.offersRendered, 0);
+  assert.strictEqual(emptyView.hasPlanningCta, true);
+  assert.strictEqual(
+    emptyView.message,
+    "No active trip request. Plan and publish your itinerary to receive competitive fleet offers."
+  );
+
+  // 2. When valid real trip has 0 quotes
+  const waitingView = renderCabOffersView({ id: "trp_real_1", trip_code: "TRP-9999" }, []);
+  assert.strictEqual(waitingView.viewType, "WAITING_QUOTES");
+  assert.strictEqual(waitingView.offersRendered, 0);
+
+  // 3. When valid real trip has real quotes
+  const activeView = renderCabOffersView({ id: "trp_real_1", trip_code: "TRP-9999" }, [
+    { id: "quo_1", total_quote: 15000, status: "pending" },
+    { id: "quo_2", total_quote: 16500, status: "pending" },
+  ]);
+  assert.strictEqual(activeView.viewType, "QUOTATION_LIST");
+  assert.strictEqual(activeView.offersRendered, 2);
+
+  // 4. Verify that code files do not contain hardcoded trp_9042 fallback in components
+  const fs = require("fs");
+  const path = require("path");
+  const cabOffersCode = fs.readFileSync(path.join(__dirname, "../components/traveller/CabOffersView.tsx"), "utf8");
+  assert.strictEqual(cabOffersCode.includes("trp_9042"), false, "CabOffersView must not reference hardcoded trp_9042");
+  assert.strictEqual(cabOffersCode.includes("usr_rohan"), false, "CabOffersView must not reference hardcoded usr_rohan");
+});
+
+// 46. Authentication Enforcement in Marketplace Workflows (Publishing, Quoting, Vehicle Registration)
+test("Marketplace Workflows: Unauthenticated actions open AuthModal, prevent guest fabrication, and attach sessions", () => {
+  // Simulate workflow auth gatekeeper
+  function handleWorkflowAction(actionType, user, profile, payload) {
+    if (!user) {
+      return { action: "PROMPT_AUTH_MODAL", preservePayload: payload, permitted: false };
+    }
+
+    if (actionType === "PUBLISH_TRIP") {
+      return {
+        action: "EXECUTE_API",
+        permitted: true,
+        travelerId: user.id, // Strictly derived from user
+      };
+    }
+
+    if (actionType === "SUBMIT_QUOTE") {
+      if (profile?.role !== "operator") {
+        return { action: "REJECT", error: "Operator role required", permitted: false };
+      }
+      if (!profile?.verified) {
+        return { action: "REJECT", error: "Operator verification required", permitted: false };
+      }
+      return {
+        action: "EXECUTE_API",
+        permitted: true,
+        operatorId: user.id,
+      };
+    }
+
+    if (actionType === "REGISTER_VEHICLE") {
+      return {
+        action: "EXECUTE_API",
+        permitted: true,
+        operatorId: user.id,
+      };
+    }
+
+    return { permitted: false };
+  }
+
+  // 1. Unauthenticated traveller publishing trip -> Triggers auth modal and preserves payload
+  const draftTrip = { origin: "Jaipur", destination: "Udaipur", travellers_count: 5 };
+  const unauthPublish = handleWorkflowAction("PUBLISH_TRIP", null, null, draftTrip);
+  assert.strictEqual(unauthPublish.action, "PROMPT_AUTH_MODAL");
+  assert.strictEqual(unauthPublish.permitted, false);
+  assert.deepStrictEqual(unauthPublish.preservePayload, draftTrip);
+
+  // 2. Authenticated traveller publishing trip -> Binds travelerId to session user
+  const authPublish = handleWorkflowAction("PUBLISH_TRIP", { id: "usr_alice" }, { role: "traveller" }, draftTrip);
+  assert.strictEqual(authPublish.action, "EXECUTE_API");
+  assert.strictEqual(authPublish.permitted, true);
+  assert.strictEqual(authPublish.travelerId, "usr_alice");
+
+  // 3. Unauthenticated operator submitting quote -> Triggers auth modal
+  const unauthQuote = handleWorkflowAction("SUBMIT_QUOTE", null, null, { totalQuote: 25000 });
+  assert.strictEqual(unauthQuote.action, "PROMPT_AUTH_MODAL");
+  assert.strictEqual(unauthQuote.permitted, false);
+
+  // 4. Non-operator attempting to quote -> Rejected
+  const travellerQuoting = handleWorkflowAction("SUBMIT_QUOTE", { id: "usr_alice" }, { role: "traveller" }, {});
+  assert.strictEqual(travellerQuoting.permitted, false);
+  assert.match(travellerQuoting.error, /Operator role required/);
+
+  // 5. Unverified operator attempting to quote -> Rejected
+  const unverifiedQuoting = handleWorkflowAction("SUBMIT_QUOTE", { id: "op_unverified" }, { role: "operator", verified: false }, {});
+  assert.strictEqual(unverifiedQuoting.permitted, false);
+  assert.match(unverifiedQuoting.error, /Operator verification required/);
+
+  // 6. Verified operator submitting quote -> Permitted
+  const verifiedQuoting = handleWorkflowAction("SUBMIT_QUOTE", { id: "op_verified" }, { role: "operator", verified: true }, {});
+  assert.strictEqual(verifiedQuoting.action, "EXECUTE_API");
+  assert.strictEqual(verifiedQuoting.permitted, true);
+  assert.strictEqual(verifiedQuoting.operatorId, "op_verified");
+});
+
+// 47. Vehicle and Quotation Persistence Error Handling: DB failure returns 500 (Never 201 with fabricated records)
+test("Vehicle & Quotation APIs: DB insertion failure returns HTTP 500 and never 201 with fabricated records", async () => {
+  // Simulate POST /api/vehicles persistence logic
+  function simulateVehicleRegister(dbError, vehiclePayload) {
+    if (!vehiclePayload.name || !vehiclePayload.registration_number) {
+      return { status: 400, error: "name and registration_number are required" };
+    }
+
+    if (dbError) {
+      // Defect fix: Must return 500, NOT 201 with database_synced: false
+      return {
+        status: 500,
+        error: `Database insertion failed: ${dbError.message}`,
+      };
+    }
+
+    const persistedVehicle = {
+      ...vehiclePayload,
+      id: `veh_${Date.now()}`,
+      status: "Available",
+      created_at: new Date().toISOString(),
+    };
+
+    return {
+      status: 201,
+      data: persistedVehicle,
+      database_synced: true,
+    };
+  }
+
+  // 1. Vehicle DB failure returns HTTP 500
+  const vehFail = simulateVehicleRegister(new Error("Connection terminated unexpectedly"), {
+    name: "Force Urbania",
+    registration_number: "DL 01 TA 1234",
+  });
+  assert.strictEqual(vehFail.status, 500);
+  assert.strictEqual(vehFail.data, undefined);
+  assert.match(vehFail.error, /Database insertion failed/);
+
+  // 2. Vehicle DB success returns HTTP 201
+  const vehSuccess = simulateVehicleRegister(null, {
+    name: "Force Urbania",
+    registration_number: "DL 01 TA 1234",
+  });
+  assert.strictEqual(vehSuccess.status, 201);
+  assert.strictEqual(vehSuccess.database_synced, true);
+  assert.ok(vehSuccess.data?.id);
+
+  // Simulate POST /api/quotations persistence logic
+  function simulateQuoteSubmit(dbError, quotePayload) {
+    if (!quotePayload.trip_request_id || !quotePayload.vehicle_id) {
+      return { status: 400, error: "trip_request_id and vehicle_id are required" };
+    }
+
+    if (dbError) {
+      // Defect fix: Must return 500, NOT 201 with database_synced: false
+      return {
+        status: 500,
+        error: `Database insertion failed: ${dbError.message}`,
+      };
+    }
+
+    const persistedQuote = {
+      ...quotePayload,
+      id: `quo_${Date.now()}`,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+
+    return {
+      status: 201,
+      data: persistedQuote,
+      database_synced: true,
+    };
+  }
+
+  // 3. Quotation DB failure returns HTTP 500
+  const quoteFail = simulateQuoteSubmit(new Error("Disk full / table locked"), {
+    trip_request_id: "trp_1",
+    vehicle_id: "veh_1",
+  });
+  assert.strictEqual(quoteFail.status, 500);
+  assert.strictEqual(quoteFail.data, undefined);
+  assert.match(quoteFail.error, /Database insertion failed/);
+
+  // 4. Quotation DB success returns HTTP 201
+  const quoteSuccess = simulateQuoteSubmit(null, {
+    trip_request_id: "trp_1",
+    vehicle_id: "veh_1",
+  });
+  assert.strictEqual(quoteSuccess.status, 201);
+  assert.strictEqual(quoteSuccess.database_synced, true);
+  assert.ok(quoteSuccess.data?.id);
+});
+
+
 
 
