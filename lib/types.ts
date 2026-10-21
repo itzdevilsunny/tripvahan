@@ -124,6 +124,7 @@ export interface TripRequest {
   pickup_address: string;
   travellers_count: number;
   adults_count: number;
+  children_count?: number;
   seniors_count: number;
   luggage_bags: number;
   matched_vehicle_class: string;

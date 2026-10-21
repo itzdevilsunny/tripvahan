@@ -312,10 +312,19 @@ export async function POST(req: Request) {
       origin = rawExtract.origin;
       destination = rawExtract.destination;
       days = Math.max(1, rawExtract.days_count || 3);
-      adults = Math.max(1, rawExtract.adults_count ?? rawExtract.travellers_count ?? 4);
       children = Math.max(0, rawExtract.children_count || 0);
       seniors = Math.max(0, rawExtract.seniors_count || 0);
-      totalPax = rawExtract.travellers_count || adults + children + seniors;
+
+      // Canonical passenger count logic
+      if (typeof rawExtract.adults_count === "number" && rawExtract.adults_count > 0) {
+        adults = rawExtract.adults_count;
+      } else if (typeof rawExtract.travellers_count === "number" && rawExtract.travellers_count > 0) {
+        adults = Math.max(1, rawExtract.travellers_count - children - seniors);
+      } else {
+        adults = 4;
+      }
+      totalPax = adults + children + seniors;
+
       luggage = rawExtract.luggage_bags ?? totalPax;
       userBudget = rawExtract.target_budget || 0;
       circuitType = rawExtract.circuit_type || (days > 1 ? "Multi-day circuit" : "Round Trip");
@@ -342,7 +351,7 @@ export async function POST(req: Request) {
       adults = parsed.adults_count;
       children = parsed.children_count;
       seniors = parsed.seniors_count;
-      totalPax = parsed.travellers_count;
+      totalPax = adults + children + seniors;
       luggage = parsed.luggage_bags;
       userBudget = parsed.target_budget;
       circuitType = parsed.circuit_type;
@@ -357,7 +366,7 @@ export async function POST(req: Request) {
     const formattedTravelTime = routeIntel.formatted_travel_time;
 
     // LAYER 3: Deterministic Vehicle Suitability
-    const vehicleIntel = evaluateVehicleSuitability(totalPax, luggage, days, distanceKm, origin, destination);
+    const vehicleIntel = evaluateVehicleSuitability(totalPax, luggage, days, distanceKm, origin, destination, isOneWay);
     const matchedVehicle = vehicleIntel.primaryVehicle;
     const vehicleRecommendations = vehicleIntel.recommendations;
     const luggageWarning = vehicleIntel.luggageWarning;
@@ -369,7 +378,8 @@ export async function POST(req: Request) {
       matchedVehicle,
       userBudget,
       origin,
-      destination
+      destination,
+      isOneWay
     );
 
     // Standard Amenities

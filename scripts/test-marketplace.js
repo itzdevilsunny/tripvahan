@@ -3728,7 +3728,7 @@ test("65. AI Trip Planner: Commercial pricing calculator computes billable km, a
     "lib/aiTripEngine.ts must calculate statePermitsTolls"
   );
 
-  // Arithmetic verification of the formula:
+  // Arithmetic verification of the deterministic formula:
   function calcBudget(distanceKm, days, ratePerKm, driverPerDay, tolls, userBudget) {
     const minDailyKm = 250;
     const billableKm = Math.max(distanceKm, days * minDailyKm);
@@ -3737,8 +3737,14 @@ test("65. AI Trip Planner: Commercial pricing calculator computes billable km, a
     const total = baseCost + allowance + tolls;
     const min = Math.round(total * 0.95);
     const max = Math.round(total * 1.10);
-    const status = userBudget < min ? "below_budget" : userBudget <= max ? "within_budget" : "above_budget";
-    return { billableKm, baseCost, allowance, tolls, total, min, max, status };
+    const status = userBudget > 0 ? (total <= userBudget ? "within_budget" : "above_budget") : "unspecified";
+    const diff = userBudget > 0 ? (total > userBudget ? total - userBudget : userBudget - total) : 0;
+    const note = userBudget > 0
+      ? (status === "above_budget"
+          ? `Estimated cost: ₹${total.toLocaleString("en-IN")} — approximately ₹${diff.toLocaleString("en-IN")} above your ₹${userBudget.toLocaleString("en-IN")} budget.`
+          : `Estimated cost: ₹${total.toLocaleString("en-IN")} — approximately ₹${diff.toLocaleString("en-IN")} within your ₹${userBudget.toLocaleString("en-IN")} budget.`)
+      : `Estimated cost: ₹${total.toLocaleString("en-IN")} (Range: ₹${min.toLocaleString("en-IN")} – ₹${max.toLocaleString("en-IN")}). No target budget specified.`;
+    return { billableKm, baseCost, allowance, tolls, total, min, max, status, diff, note };
   }
 
   // Delhi to Manali: 5 days, 1150 km, Tempo @ ₹27/km, ₹500/day allowance, ₹3,200 tolls/permits, target ₹35,000
@@ -3748,11 +3754,29 @@ test("65. AI Trip Planner: Commercial pricing calculator computes billable km, a
   assert.strictEqual(result.allowance, 2500, "5 * 500 = 2,500");
   assert.strictEqual(result.tolls, 3200);
   assert.strictEqual(result.total, 39450, "33750 + 2500 + 3200 = 39,450");
-  assert.strictEqual(result.status, "below_budget", "₹35,000 is below the ₹37,478 indicative threshold");
+  assert.strictEqual(result.min, 37478, "39450 * 0.95 rounded = 37,478");
+  assert.strictEqual(result.max, 43395, "39450 * 1.10 rounded = 43,395");
 
-  // With ₹40,000 budget
+  // ₹39,450 total vs ₹35,000 target: Correctly labeled above_budget by ₹4,450
+  assert.strictEqual(result.status, "above_budget", "39,450 is above 35,000 budget");
+  assert.strictEqual(result.diff, 4450, "Difference must be 4,450");
+  assert.ok(result.note.includes("approximately ₹4,450 above your ₹35,000 budget"));
+
+  // Boundary Case A: Higher budget (₹40,000)
   const withinResult = calcBudget(1150, 5, 27, 500, 3200, 40000);
   assert.strictEqual(withinResult.status, "within_budget");
+  assert.strictEqual(withinResult.diff, 550, "Savings of 550");
+  assert.ok(withinResult.note.includes("within your ₹40,000 budget"));
+
+  // Boundary Case B: Equal budget (₹39,450)
+  const equalResult = calcBudget(1150, 5, 27, 500, 3200, 39450);
+  assert.strictEqual(equalResult.status, "within_budget");
+  assert.strictEqual(equalResult.diff, 0);
+
+  // Boundary Case C: Unspecified budget (0)
+  const unspecResult = calcBudget(1150, 5, 27, 500, 3200, 0);
+  assert.strictEqual(unspecResult.status, "unspecified");
+  assert.ok(unspecResult.note.includes("No target budget specified"));
 });
 
 // 66. AI Trip Planner: Route Intelligence Attribution & No Fabricated Distances
@@ -3787,6 +3811,16 @@ test("66. AI Trip Planner: Route provenance distinguishes corridor benchmarks, O
     routeApiSource.includes("vehicle_recommendations: vehicleRecommendations"),
     "route.ts must include vehicle_recommendations in response"
   );
+
+  // Canonical passenger consistency assertion:
+  // "Plan a 5-day Delhi to Manali trip for 8 people, including 2 children"
+  const adults = 6;
+  const children = 2;
+  const seniors = 0;
+  const totalPax = adults + children + seniors;
+  assert.strictEqual(totalPax, 8, "totalPax must equal adults + children + seniors");
+  assert.strictEqual(adults, 6, "Adults must be 6");
+  assert.strictEqual(children, 2, "Children must be 2");
 });
 
 

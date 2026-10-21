@@ -21,8 +21,9 @@ export interface IndicativeBudgetBreakdown {
   indicative_min: number;
   indicative_max: number;
   target_budget: number;
-  budget_status: "within_budget" | "below_budget" | "above_budget" | "unspecified";
+  budget_status: "within_budget" | "above_budget" | "unspecified";
   budget_comparison_note: string;
+  is_one_way: boolean;
 }
 
 export interface RouteIntelligence {
@@ -45,6 +46,18 @@ export interface CorridorBenchmark {
   baseBudgetSuv: number;
   baseBudgetTempo: number;
 }
+
+// Configurable pricing parameters for outstation commercial transport
+export const PRICING_CONFIG = {
+  minDailyKm: 250,
+  driverAllowancePerDay: 500,
+  tariffs: {
+    sedan: 13,
+    suv: 19,
+    tempo: 27,
+    coach: 42,
+  },
+};
 
 export const KNOWN_CORRIDORS: Record<string, CorridorBenchmark> = {
   "delhi-manali": {
@@ -223,7 +236,8 @@ export function evaluateVehicleSuitability(
   days: number,
   distanceKm: number,
   origin: string = "",
-  destination: string = ""
+  destination: string = "",
+  isOneWay: boolean = false
 ): {
   recommendations: VehicleRecommendation[];
   primaryVehicle: string;
@@ -232,10 +246,10 @@ export function evaluateVehicleSuitability(
   const safePax = Math.max(1, pax);
   const safeBags = Math.max(0, bags);
 
-  const sedanBudget = calculateIndicativeBudget(distanceKm, days, "Executive Sedan", 0, origin, destination).indicative_total;
-  const suvBudget = calculateIndicativeBudget(distanceKm, days, "Innova Crysta", 0, origin, destination).indicative_total;
-  const tempoBudget = calculateIndicativeBudget(distanceKm, days, "Urbania / Tempo", 0, origin, destination).indicative_total;
-  const coachBudget = calculateIndicativeBudget(distanceKm, days, "Coach", 0, origin, destination).indicative_total;
+  const sedanBudget = calculateIndicativeBudget(distanceKm, days, "Executive Sedan", 0, origin, destination, isOneWay).indicative_total;
+  const suvBudget = calculateIndicativeBudget(distanceKm, days, "Innova Crysta", 0, origin, destination, isOneWay).indicative_total;
+  const tempoBudget = calculateIndicativeBudget(distanceKm, days, "Urbania / Tempo", 0, origin, destination, isOneWay).indicative_total;
+  const coachBudget = calculateIndicativeBudget(distanceKm, days, "Coach", 0, origin, destination, isOneWay).indicative_total;
 
   const recommendations: VehicleRecommendation[] = [];
   let primaryVehicle = "Force Urbania / Tempo (12-16 Seater)";
@@ -251,7 +265,7 @@ export function evaluateVehicleSuitability(
         luggage_capacity: 3,
         is_recommended: true,
         tier_tag: "Recommended",
-        suitability_reason: "Optimal match for up to 4 travellers with light luggage. Fuel-efficient and cost-effective.",
+        suitability_reason: `Optimal economical choice for ${safePax} travellers with ${safeBags} bags. Full passenger seating comfort with standard trunk storage.`,
         estimated_cost: sedanBudget,
       });
       recommendations.push({
@@ -275,10 +289,10 @@ export function evaluateVehicleSuitability(
         estimated_cost: tempoBudget,
       });
     } else {
-      // 4 or fewer pax, but > 3 bags (e.g. 3 travellers with 8 bags)
+      // 4 or fewer pax, but > 3 bags
       primaryVehicle = safeBags > 6 ? "Force Urbania / Tempo (12-16 Seater)" : "Innova Crysta / Premium SUV (6+1 / 7+1)";
       luggageWarning = safeBags > 6
-        ? `${safeBags} luggage bags exceed typical SUV trunk limits; Tempo or overhead carrier rack ensures comfortable passenger seating without clutter.`
+        ? `${safeBags} luggage bags exceed typical SUV trunk limits; Tempo or overhead carrier rack ensures comfortable passenger seating without cabin clutter.`
         : `${safeBags} bags exceed sedan trunk capacity; SUV or carrier rack recommended.`;
 
       if (safeBags > 6) {
@@ -491,19 +505,25 @@ export function calculateIndicativeBudget(
   category: string,
   userTargetBudget: number = 0,
   origin: string = "",
-  destination: string = ""
+  destination: string = "",
+  isOneWay: boolean = false,
+  config = PRICING_CONFIG
 ): IndicativeBudgetBreakdown {
   const safeDays = Math.max(1, days || 1);
-  const minDailyKm = 250;
-  const billableKm = Math.max(distanceKm || 500, safeDays * minDailyKm);
+  const minDailyKm = config.minDailyKm;
+  // In outstation commercial cab operations:
+  // Billable km is the greater of actual road distance or minimum daily commitment
+  const billableKm = isOneWay
+    ? Math.max(distanceKm || 300, minDailyKm)
+    : Math.max(distanceKm || 500, safeDays * minDailyKm);
 
-  let perKmRate = 13;
-  if (category.includes("Innova") || category.includes("SUV")) perKmRate = 19;
-  else if (category.includes("Urbania") || category.includes("Tempo")) perKmRate = 27;
-  else if (category.includes("Coach")) perKmRate = 42;
+  let perKmRate = config.tariffs.sedan;
+  if (category.includes("Innova") || category.includes("SUV")) perKmRate = config.tariffs.suv;
+  else if (category.includes("Urbania") || category.includes("Tempo")) perKmRate = config.tariffs.tempo;
+  else if (category.includes("Coach")) perKmRate = config.tariffs.coach;
 
   const baseVehicleCost = billableKm * perKmRate;
-  const driverAllowance = safeDays * 500;
+  const driverAllowance = safeDays * config.driverAllowancePerDay;
 
   // Inter-state commercial taxes and tolls estimates
   let statePermitsTolls = 1500;
@@ -535,20 +555,23 @@ export function calculateIndicativeBudget(
   const indicativeMin = Math.round(indicativeTotal * 0.95);
   const indicativeMax = Math.round(indicativeTotal * 1.10);
 
-  let budgetStatus: "within_budget" | "below_budget" | "above_budget" | "unspecified" = "unspecified";
-  let budgetComparisonNote = "Indicative market estimate calculated from billable kilometres, vehicle per-km tariff, and standard driver allowances.";
+  // Deterministic budget status calculation:
+  // within_budget: if indicativeTotal <= userTargetBudget
+  // above_budget: if indicativeTotal > userTargetBudget
+  let budgetStatus: "within_budget" | "above_budget" | "unspecified" = "unspecified";
+  let budgetComparisonNote = `Estimated cost: ₹${indicativeTotal.toLocaleString("en-IN")} (Range: ₹${indicativeMin.toLocaleString("en-IN")} – ₹${indicativeMax.toLocaleString("en-IN")}). No target budget specified.`;
 
   if (userTargetBudget > 0) {
-    if (userTargetBudget < indicativeMin) {
-      budgetStatus = "below_budget";
-      const diff = indicativeMin - userTargetBudget;
-      budgetComparisonNote = `Your budget (₹${userTargetBudget.toLocaleString("en-IN")}) is ~₹${diff.toLocaleString("en-IN")} below typical commercial rates for this vehicle tier. Operators may propose standard or off-peak quotations.`;
-    } else if (userTargetBudget >= indicativeMin && userTargetBudget <= indicativeMax) {
+    if (indicativeTotal <= userTargetBudget) {
       budgetStatus = "within_budget";
-      budgetComparisonNote = `Your budget (₹${userTargetBudget.toLocaleString("en-IN")}) aligns accurately with standard commercial fleet estimates for this itinerary.`;
+      const savings = userTargetBudget - indicativeTotal;
+      budgetComparisonNote = savings > 0
+        ? `Estimated cost: ₹${indicativeTotal.toLocaleString("en-IN")} — approximately ₹${savings.toLocaleString("en-IN")} within your ₹${userTargetBudget.toLocaleString("en-IN")} budget.`
+        : `Estimated cost: ₹${indicativeTotal.toLocaleString("en-IN")} — matches your ₹${userTargetBudget.toLocaleString("en-IN")} budget.`;
     } else {
       budgetStatus = "above_budget";
-      budgetComparisonNote = `Your budget (₹${userTargetBudget.toLocaleString("en-IN")}) provides comfortable flexibility for premium vehicle models or upgraded driver allowances.`;
+      const diff = indicativeTotal - userTargetBudget;
+      budgetComparisonNote = `Estimated cost: ₹${indicativeTotal.toLocaleString("en-IN")} — approximately ₹${diff.toLocaleString("en-IN")} above your ₹${userTargetBudget.toLocaleString("en-IN")} budget.`;
     }
   }
 
@@ -564,6 +587,7 @@ export function calculateIndicativeBudget(
     target_budget: userTargetBudget,
     budget_status: budgetStatus,
     budget_comparison_note: budgetComparisonNote,
+    is_one_way: isOneWay,
   };
 }
 
@@ -777,6 +801,9 @@ export function parsePromptWithNlp(prompt: string): {
       adults -= seniors;
     }
   }
+
+  // Canonical invariant
+  totalPax = adults + children + seniors;
 
   let luggage = Math.min(totalPax, 12);
   const bagMatch = p.match(/(\d+)\s*(?:bags|bag|luggage|suitcases|trolleys)/i);

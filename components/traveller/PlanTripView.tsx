@@ -111,12 +111,13 @@ export default function PlanTripView({
   }, [initialCircuit]);
 
   // Passengers & Luggage
-  const [adults, setAdults] = useState(8);
-  const [seniors, setSeniors] = useState(2);
+  const [adults, setAdults] = useState(6);
+  const [children, setChildren] = useState(2);
+  const [seniors, setSeniors] = useState(0);
   const [trolleys, setTrolleys] = useState(8);
-  const [duffles, setDuffles] = useState(2);
+  const [duffles, setDuffles] = useState(0);
 
-  const totalPax = adults + seniors;
+  const totalPax = adults + children + seniors;
   const totalBags = trolleys + duffles;
 
   // Target Budget Slider
@@ -164,11 +165,15 @@ export default function PlanTripView({
       setDistanceKm(plan.distance_km);
       prefilled.push("Distance");
     }
-    if (plan.adults_count) {
+    if (typeof plan.adults_count === "number") {
       setAdults(plan.adults_count);
       prefilled.push("Adults");
     }
-    if (plan.seniors_count) {
+    if (typeof plan.children_count === "number") {
+      setChildren(plan.children_count);
+      prefilled.push("Children");
+    }
+    if (typeof plan.seniors_count === "number") {
       setSeniors(plan.seniors_count);
       prefilled.push("Seniors");
     }
@@ -303,6 +308,7 @@ export default function PlanTripView({
         pickup_address: pickupAddress,
         travellers_count: totalPax,
         adults_count: adults,
+        children_count: children,
         seniors_count: seniors,
         luggage_bags: totalBags,
         matched_vehicle_class: matchedVehicle,
@@ -652,7 +658,9 @@ export default function PlanTripView({
             <div className="text-sm font-bold text-[#172B2A] mt-0.5">
               {totalPax} Travellers
             </div>
-            <div className="text-[11px] text-[#718096]">{adults} Adults, {seniors} Elders</div>
+            <div className="text-[11px] text-[#718096]">
+              {adults} Adults, {children} Kids, {seniors} Elders
+            </div>
           </div>
         </div>
 
@@ -665,6 +673,18 @@ export default function PlanTripView({
               className="bg-[#F7F8FA] border border-[#E5EAF0] rounded-lg px-2 py-1 text-xs font-semibold text-[#172B2A]"
             >
               {[1, 2, 4, 6, 8, 10, 12, 14, 16, 20].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-[#718096]">Kd:</span>
+            <select
+              value={children}
+              onChange={(e) => setChildren(Number(e.target.value))}
+              className="bg-[#F7F8FA] border border-[#E5EAF0] rounded-lg px-2 py-1 text-xs font-semibold text-[#172B2A]"
+            >
+              {[0, 1, 2, 3, 4, 5, 6, 8].map((n) => (
                 <option key={n} value={n}>{n}</option>
               ))}
             </select>

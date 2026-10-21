@@ -744,19 +744,39 @@ export default function AiTripPlannerModal({
                       </div>
                     </div>
 
-                    <div className="bg-[#F7F8FA] p-3.5 rounded-xl border border-[#E5EAF0] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                      <div>
-                        <span className="text-xs font-semibold text-[#172B2A] block">
-                          Estimated Market Range
-                        </span>
-                        <p className="text-[11px] text-[#718096] mt-0.5">
-                          {plan.budget_breakdown.budget_comparison_note}
-                        </p>
-                      </div>
-                      <div className="text-left sm:text-right shrink-0">
-                        <span className="text-sm sm:text-base font-extrabold text-[#075E54]">
-                          ₹{plan.indicative_budget_min.toLocaleString("en-IN")} – ₹{plan.indicative_budget_max.toLocaleString("en-IN")}
-                        </span>
+                    <div className="bg-[#F7F8FA] p-3.5 rounded-xl border border-[#E5EAF0] space-y-2">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-[#172B2A]">
+                              Estimated Trip Total: ₹{plan.budget_breakdown.indicative_total.toLocaleString("en-IN")}
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                                plan.budget_breakdown.budget_status === "within_budget"
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : plan.budget_breakdown.budget_status === "above_budget"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : "bg-gray-100 text-gray-700"
+                              }`}
+                            >
+                              {plan.budget_breakdown.budget_status === "within_budget"
+                                ? "Within Budget"
+                                : plan.budget_breakdown.budget_status === "above_budget"
+                                ? "Above Target Budget"
+                                : "Benchmark"}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-[#718096] mt-1 font-medium">
+                            {plan.budget_breakdown.budget_comparison_note}
+                          </p>
+                        </div>
+                        <div className="text-left sm:text-right shrink-0">
+                          <span className="text-[11px] text-[#718096] block">Indicative Range</span>
+                          <span className="text-xs sm:text-sm font-extrabold text-[#075E54]">
+                            ₹{plan.indicative_budget_min.toLocaleString("en-IN")} – ₹{plan.indicative_budget_max.toLocaleString("en-IN")}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
