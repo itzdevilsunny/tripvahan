@@ -3525,6 +3525,60 @@ test("60. AI Trip Planner: Modal transfer never auto-publishes to database; requ
   assert.strictEqual(authAttempt.trip.traveler_id, "usr_verified_traveler");
 });
 
+// 61. Production UI: Elimination of Hackathon Walkthrough Banner
+test("61. Production UI: Hackathon Walkthrough Banner and demo state are completely removed from app/page.tsx", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const pagePath = path.resolve(__dirname, "../app/page.tsx");
+  const pageContent = fs.readFileSync(pagePath, "utf-8");
+
+  assert.strictEqual(
+    pageContent.includes("Hackathon Demo Walkthrough"),
+    false,
+    "app/page.tsx must not contain the Hackathon Demo Walkthrough title"
+  );
+  assert.strictEqual(
+    pageContent.includes("showHackathonGuide"),
+    false,
+    "app/page.tsx must not contain showHackathonGuide state or handler"
+  );
+  assert.strictEqual(
+    pageContent.includes("Follow 3 simple steps to experience the complete marketplace"),
+    false,
+    "app/page.tsx must not contain hackathon guide instruction text"
+  );
+});
+
+// 62. Production Security: Elimination of 1-Click Demo Persona Logins
+test("62. Production Security: AuthModal requires genuine credentials and contains no 1-click demo persona bypass", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const authModalPath = path.resolve(__dirname, "../components/common/AuthModal.tsx");
+  const authModalContent = fs.readFileSync(authModalPath, "utf-8");
+
+  assert.strictEqual(
+    authModalContent.includes("handleQuickSignIn"),
+    false,
+    "AuthModal must not contain handleQuickSignIn demo bypass function"
+  );
+  assert.strictEqual(
+    authModalContent.includes("@tripvahan.demo"),
+    false,
+    "AuthModal must not contain hardcoded demo email credentials"
+  );
+  assert.strictEqual(
+    authModalContent.includes("Hackathon Quick Access"),
+    false,
+    "AuthModal must not contain Hackathon Quick Access card"
+  );
+  assert.strictEqual(
+    authModalContent.includes("1-Click Demo Login"),
+    false,
+    "AuthModal must not contain 1-Click Demo Login UI"
+  );
+});
+
+
 
 
 

@@ -111,7 +111,7 @@ export default function QuoteSubmitterModal({
         trip_code: tripRequest.trip_code,
         operator_id: opId,
         operator_name: opName,
-        operator_rating: profile?.rating || 4.90,
+        operator_rating: profile?.rating || 0,
         reviews_count: profile?.reviews_count || 0,
         vehicle_id: selectedVehicle.id,
         vehicle_name: selectedVehicle.name,

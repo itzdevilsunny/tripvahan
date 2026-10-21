@@ -9,7 +9,6 @@ import {
   Users,
   ArrowRight,
   ShieldCheck,
-  Star,
   Car,
 } from "lucide-react";
 
@@ -38,8 +37,7 @@ export default function ExploreView({ onSelectCircuit, onOpenAiPlanner }: Explor
       image:
         "https://images.unsplash.com/photo-1599661046289-e31897846e41?auto=format&fit=crop&w=800&q=80",
       paxRecommendation: "10–14 Pax (Force Urbania)",
-      rating: 4.95,
-      reviews: 320,
+      tag: "Heritage Corridor",
     },
     {
       title: "Devbhoomi Pilgrimage",
@@ -52,8 +50,7 @@ export default function ExploreView({ onSelectCircuit, onOpenAiPlanner }: Explor
       image:
         "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80",
       paxRecommendation: "6–7 Pax (Innova Crysta)",
-      rating: 4.88,
-      reviews: 195,
+      tag: "Pilgrimage Route",
     },
     {
       title: "Himachal Valley Express",
@@ -66,8 +63,7 @@ export default function ExploreView({ onSelectCircuit, onOpenAiPlanner }: Explor
       image:
         "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80",
       paxRecommendation: "12–16 Pax (Tempo Traveller AC)",
-      rating: 4.92,
-      reviews: 140,
+      tag: "Highland Corridor",
     },
   ];
 
@@ -140,9 +136,9 @@ export default function ExploreView({ onSelectCircuit, onOpenAiPlanner }: Explor
                 </div>
                 <div className="absolute bottom-2.5 left-3.5 right-3.5 flex items-center justify-between text-white text-xs">
                   <span className="font-medium">{c.distanceKm} km Circuit</span>
-                  <span className="flex items-center gap-1 font-medium">
-                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                    {c.rating} ({c.reviews})
+                  <span className="flex items-center gap-1 font-medium bg-black/40 backdrop-blur-xs px-2 py-0.5 rounded-full text-[11px] text-emerald-200">
+                    <Compass className="w-3.5 h-3.5" />
+                    {c.tag}
                   </span>
                 </div>
               </div>

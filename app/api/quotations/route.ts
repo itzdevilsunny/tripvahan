@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     // Verify caller role and operator profile
     const { data: operatorProfile, error: profErr } = await supabase
       .from("profiles")
-      .select("id, role, operator_name, verified")
+      .select("id, role, operator_name, verified, rating, reviews_count")
       .eq("id", user.id)
       .maybeSingle();
 
@@ -71,8 +71,8 @@ export async function POST(req: Request) {
       trip_code,
       operator_id,
       operator_name,
-      operator_rating = 4.9,
-      reviews_count = 120,
+      operator_rating,
+      reviews_count,
       vehicle_id,
       vehicle_name,
       vehicle_category,
@@ -194,8 +194,8 @@ export async function POST(req: Request) {
       trip_code: trip_code || "TRP",
       operator_id: authoritativeOperatorId,
       operator_name: authoritativeOperatorName,
-      operator_rating: Number(operator_rating),
-      reviews_count: Number(reviews_count),
+      operator_rating: typeof operatorProfile.rating === "number" ? operatorProfile.rating : Number(operator_rating) || 0,
+      reviews_count: typeof operatorProfile.reviews_count === "number" ? operatorProfile.reviews_count : Number(reviews_count) || 0,
       vehicle_id,
       vehicle_name,
       vehicle_category,
