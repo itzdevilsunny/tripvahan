@@ -2,7 +2,7 @@
 -- TRIPVAHAN DATABASE MIGRATION:
 -- PREVENT DATABASE-LEVEL PRIVILEGE ESCALATION ON PROFILE INSERT
 -- File: supabase/migrations/20261020_prevent_profile_role_escalation_on_insert.sql
--- Status: PREPARED FOR REVIEW (DO NOT EXECUTE WITHOUT SIGN-OFF)
+-- Status: APPLIED & ACTIVE ON SUPABASE PRODUCTION
 -- ====================================================================
 -- Summary:
 -- 1. Updates public.protect_profile_privilege_escalation() function to
