@@ -267,7 +267,7 @@ export default function AiTripPlannerModal({
               {engine === "gemini_live" ? (
                 <span className="font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  Gemini 1.5 Flash (Live Model)
+                  Gemini 2.5 Flash (Live Model)
                 </span>
               ) : (
                 <span className="font-semibold text-[#075E54] bg-[#DDF7ED] px-2.5 py-0.5 rounded-full border border-[#075E54]/20 flex items-center gap-1.5">

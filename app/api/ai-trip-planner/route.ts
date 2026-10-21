@@ -527,7 +527,7 @@ function parsePromptWithNlp(prompt: string): {
 
 // Call Google Gemini API if configured
 async function callGeminiLive(prompt: string, apiKey: string): Promise<any | null> {
-  const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const systemPrompt = `You are the Tripvahan AI Travel Assistant for group outstation cab and tempo traveller travel in India.
