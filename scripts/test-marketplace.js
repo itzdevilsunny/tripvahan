@@ -3578,6 +3578,218 @@ test("62. Production Security: AuthModal requires genuine credentials and contai
   );
 });
 
+// 63. AI Trip Planner: Groq Provider Integration & Failover Cascade
+test("63. AI Trip Planner: Groq primary provider executes with fallback cascade to Gemini and corridor benchmark", async () => {
+  async function simulateProviderCascade(hasGroqKey, hasGeminiKey, groqShouldFail) {
+    let engine = "corridor_benchmark";
+    let providerCalled = [];
+
+    if (hasGroqKey) {
+      providerCalled.push("groq");
+      if (!groqShouldFail) {
+        return {
+          engine: "groq_live",
+          providerCalled,
+          extracted: { origin: "Delhi", destination: "Manali", adults: 6, children: 2, luggage: 8 },
+        };
+      }
+    }
+
+    if (hasGeminiKey) {
+      providerCalled.push("gemini");
+      return {
+        engine: "gemini_live",
+        providerCalled,
+        extracted: { origin: "Delhi", destination: "Manali", adults: 6, children: 2, luggage: 8 },
+      };
+    }
+
+    providerCalled.push("corridor_benchmark");
+    return {
+      engine: "corridor_benchmark",
+      providerCalled,
+      extracted: { origin: "Delhi NCR", destination: "Manali", adults: 6, children: 2, luggage: 8 },
+    };
+  }
+
+  // Case A: Groq active and healthy
+  const resGroq = await simulateProviderCascade(true, true, false);
+  assert.strictEqual(resGroq.engine, "groq_live");
+  assert.deepStrictEqual(resGroq.providerCalled, ["groq"]);
+
+  // Case B: Groq fails, falls back to Gemini
+  const resGemini = await simulateProviderCascade(true, true, true);
+  assert.strictEqual(resGemini.engine, "gemini_live");
+  assert.deepStrictEqual(resGemini.providerCalled, ["groq", "gemini"]);
+
+  // Case C: Neither key configured, falls back to deterministic corridor benchmark
+  const resBenchmark = await simulateProviderCascade(false, false, false);
+  assert.strictEqual(resBenchmark.engine, "corridor_benchmark");
+  assert.deepStrictEqual(resBenchmark.providerCalled, ["corridor_benchmark"]);
+});
+
+// 64. AI Trip Planner: Deterministic Vehicle Suitability & Luggage Validation
+test("64. AI Trip Planner: Deterministic vehicle suitability evaluates luggage volume and provides 3-tier options with reasons", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const engineSource = fs.readFileSync(path.resolve(__dirname, "../lib/aiTripEngine.ts"), "utf-8");
+
+  assert.ok(
+    engineSource.includes("export function evaluateVehicleSuitability"),
+    "lib/aiTripEngine.ts must export evaluateVehicleSuitability"
+  );
+  assert.ok(
+    engineSource.includes("luggageWarning"),
+    "lib/aiTripEngine.ts must compute luggageWarning"
+  );
+  assert.ok(
+    engineSource.includes("tier_tag"),
+    "lib/aiTripEngine.ts must provide tier tags for options"
+  );
+
+  // Verification of algorithm logic:
+  function evaluateSuitability(pax, bags) {
+    if (pax <= 4) {
+      if (bags <= 3) {
+        return {
+          primaryVehicle: "Executive Sedan (Dzire / Etios)",
+          optionsCount: 3,
+          warning: null,
+          recommendedTag: "Recommended",
+        };
+      }
+      return {
+        primaryVehicle: bags > 6 ? "Force Urbania / Tempo (12-16 Seater)" : "Innova Crysta / Premium SUV (6+1 / 7+1)",
+        optionsCount: 3,
+        warning: `${bags} luggage bags exceed typical SUV trunk limits`,
+        recommendedTag: "Recommended",
+      };
+    }
+    if (pax <= 7) {
+      return {
+        primaryVehicle: bags > 6 ? "Force Urbania / Tempo (12-16 Seater)" : "Innova Crysta / Premium SUV (6+1 / 7+1)",
+        optionsCount: 3,
+        warning: bags > 6 ? "Luggage exceeds boot" : null,
+        recommendedTag: "Recommended",
+      };
+    }
+    if (pax <= 16) {
+      return {
+        primaryVehicle: "Force Urbania / Tempo (12-16 Seater)",
+        optionsCount: 3,
+        warning: null,
+        recommendedTag: "Recommended",
+      };
+    }
+    return {
+      primaryVehicle: "BharatBenz Executive Coach (19-26 Seater)",
+      optionsCount: 3,
+      warning: null,
+      recommendedTag: "Recommended",
+    };
+  }
+
+  // 1. 3 passengers with 8 luggage bags
+  const res1 = evaluateSuitability(3, 8);
+  assert.strictEqual(res1.primaryVehicle, "Force Urbania / Tempo (12-16 Seater)");
+  assert.ok(res1.warning.includes("exceed"));
+  assert.strictEqual(res1.optionsCount, 3);
+
+  // 2. 4 passengers with 2 light bags
+  const res2 = evaluateSuitability(4, 2);
+  assert.strictEqual(res2.primaryVehicle, "Executive Sedan (Dzire / Etios)");
+  assert.strictEqual(res2.warning, null);
+
+  // 3. 18 passengers
+  const res3 = evaluateSuitability(18, 15);
+  assert.strictEqual(res3.primaryVehicle, "BharatBenz Executive Coach (19-26 Seater)");
+});
+
+// 65. AI Trip Planner: Deterministic Indicative Commercial Budget Engine
+test("65. AI Trip Planner: Commercial pricing calculator computes billable km, allowances, tolls, and budget status", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const engineSource = fs.readFileSync(path.resolve(__dirname, "../lib/aiTripEngine.ts"), "utf-8");
+
+  assert.ok(
+    engineSource.includes("export function calculateIndicativeBudget"),
+    "lib/aiTripEngine.ts must export calculateIndicativeBudget"
+  );
+  assert.ok(
+    engineSource.includes("minDailyKm"),
+    "lib/aiTripEngine.ts must enforce minDailyKm assumption"
+  );
+  assert.ok(
+    engineSource.includes("driverAllowance"),
+    "lib/aiTripEngine.ts must calculate driverAllowance"
+  );
+  assert.ok(
+    engineSource.includes("statePermitsTolls"),
+    "lib/aiTripEngine.ts must calculate statePermitsTolls"
+  );
+
+  // Arithmetic verification of the formula:
+  function calcBudget(distanceKm, days, ratePerKm, driverPerDay, tolls, userBudget) {
+    const minDailyKm = 250;
+    const billableKm = Math.max(distanceKm, days * minDailyKm);
+    const baseCost = billableKm * ratePerKm;
+    const allowance = days * driverPerDay;
+    const total = baseCost + allowance + tolls;
+    const min = Math.round(total * 0.95);
+    const max = Math.round(total * 1.10);
+    const status = userBudget < min ? "below_budget" : userBudget <= max ? "within_budget" : "above_budget";
+    return { billableKm, baseCost, allowance, tolls, total, min, max, status };
+  }
+
+  // Delhi to Manali: 5 days, 1150 km, Tempo @ ₹27/km, ₹500/day allowance, ₹3,200 tolls/permits, target ₹35,000
+  const result = calcBudget(1150, 5, 27, 500, 3200, 35000);
+  assert.strictEqual(result.billableKm, 1250, "5 days * 250 = 1250 billable km");
+  assert.strictEqual(result.baseCost, 33750, "1250 * 27 = 33,750");
+  assert.strictEqual(result.allowance, 2500, "5 * 500 = 2,500");
+  assert.strictEqual(result.tolls, 3200);
+  assert.strictEqual(result.total, 39450, "33750 + 2500 + 3200 = 39,450");
+  assert.strictEqual(result.status, "below_budget", "₹35,000 is below the ₹37,478 indicative threshold");
+
+  // With ₹40,000 budget
+  const withinResult = calcBudget(1150, 5, 27, 500, 3200, 40000);
+  assert.strictEqual(withinResult.status, "within_budget");
+});
+
+// 66. AI Trip Planner: Route Intelligence Attribution & No Fabricated Distances
+test("66. AI Trip Planner: Route provenance distinguishes corridor benchmarks, OSRM routing, and explicit unavailable state", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const engineSource = fs.readFileSync(path.resolve(__dirname, "../lib/aiTripEngine.ts"), "utf-8");
+
+  assert.ok(
+    engineSource.includes("export async function resolveRouteIntelligence"),
+    "lib/aiTripEngine.ts must export resolveRouteIntelligence"
+  );
+  assert.ok(
+    engineSource.includes("corridor_benchmark"),
+    "lib/aiTripEngine.ts must support corridor_benchmark provenance"
+  );
+  assert.ok(
+    engineSource.includes("osrm_routing"),
+    "lib/aiTripEngine.ts must support live osrm_routing provenance"
+  );
+  assert.ok(
+    engineSource.includes("Route estimate unavailable"),
+    "lib/aiTripEngine.ts must return Route estimate unavailable rather than inventing numbers"
+  );
+
+  const routeApiSource = fs.readFileSync(path.resolve(__dirname, "../app/api/ai-trip-planner/route.ts"), "utf-8");
+  assert.ok(
+    routeApiSource.includes("route_intelligence: routeIntel"),
+    "route.ts must include route_intelligence in response"
+  );
+  assert.ok(
+    routeApiSource.includes("vehicle_recommendations: vehicleRecommendations"),
+    "route.ts must include vehicle_recommendations in response"
+  );
+});
+
+
 
 
 

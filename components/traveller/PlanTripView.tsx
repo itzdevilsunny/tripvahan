@@ -187,7 +187,11 @@ export default function PlanTripView({
 
     setAiPrefilledFields(prefilled);
     const engineLabel =
-      plan.engine === "gemini_live" ? "Gemini 2.5 Flash (Live)" : "Intelligent NLP Corridors";
+      plan.engine === "groq_live"
+        ? "Groq Live AI (gpt-oss-120b)"
+        : plan.engine === "gemini_live"
+        ? "Gemini 2.5 Flash (Live)"
+        : "Corridor Benchmark Engine";
     setAiNotice(
       `Itinerary pre-filled via ${engineLabel}. All parameters remain completely editable. Review and click "Submit Quote" to publish.`
     );
